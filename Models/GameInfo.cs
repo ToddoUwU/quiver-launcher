@@ -1965,7 +1965,7 @@ namespace QuiverLauncher.Models
             return PlatformAssetMatcher.MatchesPlatform(assetName, platformIdentifier);
         }
 
-        private static bool HasAnyOf(string input, params string[] substrings)
+        private static bool HasAnyOf(string input, params ReadOnlySpan<string> substrings)
         {
             foreach (var substring in substrings)
             {

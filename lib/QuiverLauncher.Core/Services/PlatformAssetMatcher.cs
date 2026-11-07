@@ -163,7 +163,7 @@ namespace QuiverLauncher.Core.Services
             return fallbackMatch;
         }
 
-        public static bool HasAnyOf(string input, params string[] substrings)
+        public static bool HasAnyOf(string input, params ReadOnlySpan<string> substrings)
         {
             foreach (var substring in substrings)
             {
