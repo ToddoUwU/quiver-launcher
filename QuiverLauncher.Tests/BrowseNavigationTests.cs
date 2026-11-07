@@ -231,6 +231,12 @@ public class BrowseNavigationTests
             await Until(() => browse.Model.Items.Count == 3);
             window.UpdateLayout();
 
+            // On a busy machine focus can reach the first card before this looks, scrolling it into view. This test is about
+            // the layout of the scrolling area, so it starts from the top either way.
+            Dispatcher.UIThread.RunJobs();
+            scroller.Offset = default;
+            window.UpdateLayout();
+
             // The title, search and filters start at the top of the scrolling area, above the cards.
             scroller.Offset.Y.Should().Be(0);
             Top(browse.BrowseToolbarPanel).Should().BeApproximately(0, 1);
