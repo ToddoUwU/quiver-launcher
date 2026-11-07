@@ -1148,17 +1148,26 @@ namespace QuiverLauncher.Models
             if (DeferUpdateTracking && !unknownInstall)
                 return false;
 
-            if (!unknownInstall && !IsNewerVersion(LatestVersion, InstalledVersion!))
+            if (!unknownInstall && !ReleaseVersionIdentity.IsNewerRelease(LatestVersion, InstalledVersion!) &&
+                !CatalogReplacesUnnumberedInstall())
                 return false;
 
             if (!string.IsNullOrWhiteSpace(SkippedUpdateVersion) &&
-                !IsNewerVersion(LatestVersion, SkippedUpdateVersion))
+                !ReleaseVersionIdentity.IsNewerRelease(LatestVersion, SkippedUpdateVersion))
             {
                 return false;
             }
 
             return true;
         }
+
+        /// <summary>
+        /// A tag with no numbers (devbuild) can't be ordered against anything, so a game installed from one would stay there
+        /// forever. It moves on when quiverlauncher.com has verified a numbered release, and only then.
+        /// </summary>
+        private bool CatalogReplacesUnnumberedInstall() =>
+            !ReleaseVersionIdentity.HasVersionNumber(InstalledVersion) && ReleaseVersionIdentity.HasVersionNumber(LatestVersion) &&
+            AreVersionsEquivalent(LatestVersion, CatalogVerifiedVersion);
 
         public void SetVersionPreferences(string? preferredVersion, string? skippedUpdateVersion)
         {

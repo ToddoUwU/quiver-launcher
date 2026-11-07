@@ -237,6 +237,38 @@ public sealed class AutoUpdateEndToEndTests : IDisposable
                 GameInstallationService.FindExecutableCandidates(folder, SearchOption.AllDirectories, null, out _).Count > 0, folder);
     }
 
+    [Theory]
+    [InlineData("release-3.1.0", "release-3.0.0", true)]
+    [InlineData("release-3.0.0", "release-3.1.0", false)]
+    [InlineData("release-3.0.0", "release-3.0.0", false)]
+    [InlineData("recommended-build-2.1", "recommended-build-2", true)]
+    [InlineData("release-3.0.0", "recommended-build-2.1", false)]
+    [InlineData("build-foo", "build-bar", false)]
+    [InlineData("v1.2", "v1.1", true)]
+    [InlineData("Version1.0.5beta9", "Version1.0.4", true)]
+    public void Tags_with_a_word_in_front_still_order_by_their_numbers(string candidate, string baseline, bool expected)
+    {
+        ReleaseVersionIdentity.IsNewerRelease(candidate, baseline).Should().Be(expected);
+    }
+
+    [Theory]
+    [InlineData("devbuild", "release-3.0.0", "release-3.0.0", true)]
+    [InlineData("devbuild", "release-3.0.0", null, false)]
+    [InlineData("devbuild", "nightly", "nightly", false)]
+    [InlineData("release-3.0.0", "release-3.1.0", "release-3.1.0", true)]
+    [InlineData("release-3.1.0", "release-3.0.0", "release-3.0.0", false)]
+    public void A_game_on_a_tag_without_numbers_follows_a_release_the_catalog_verified(string installed, string latest, string? verified, bool expected)
+    {
+        File.WriteAllText(Path.Combine(GamePath, "game.exe"), "MZ");
+        var game = new GameInfo
+        {
+            Name = "Game", Repository = "fixture/game", FolderName = "game",
+            InstalledVersion = installed, LatestVersion = latest, CatalogVerifiedVersion = verified, Status = GameStatus.Installed,
+        };
+        game.RefreshInstalledStatus();
+        (game.Status == GameStatus.UpdateAvailable).Should().Be(expected);
+    }
+
     private const string KeepRunning = "while :; do sleep 1; done";
 
     /// <summary>A copy of the shell stands in for a game: unlike sleep, which can be one program with many names, it runs under any name.</summary>

@@ -49,6 +49,37 @@ public static class ReleaseVersionIdentity
         return false;
     }
 
+    /// <summary>
+    /// Whether one release should replace another. <see cref="IsNewerVersion"/> reads no numbers from a tag with a word and
+    /// a separator in front, so release-3.1.0 never counted as newer than release-3.0.0, and a game using such tags stopped
+    /// updating. Tags with the same word compare by what follows it; different words stay unordered.
+    /// </summary>
+    public static bool IsNewerRelease(string candidateVersion, string baselineVersion)
+    {
+        if (IsNewerVersion(candidateVersion, baselineVersion))
+            return true;
+        var candidate = WordTag(candidateVersion);
+        var baseline = WordTag(baselineVersion);
+        return candidate.Word.Length > 0 && candidate.Word.Equals(baseline.Word, StringComparison.OrdinalIgnoreCase) &&
+            IsNewerVersion(candidate.Version, baseline.Version);
+    }
+
+    /// <summary>Whether a tag has any version number in it: release-3.0.0 does, devbuild doesn't.</summary>
+    public static bool HasVersionNumber(string? version) =>
+        version != null && (VersionSegments(version).Count > 0 || WordTag(version).Word.Length > 0);
+
+    /// <summary>The word and the version of a tag such as release-3.1.0 or recommended-build-2.1; empty for any other tag.</summary>
+    private static (string Word, string Version) WordTag(string tag)
+    {
+        var text = tag.AsSpan().Trim();
+        for (var i = 1; i < text.Length - 1; i++)
+        {
+            if (text[i] is '-' or '_' or ' ' && char.IsAsciiDigit(text[i + 1]) && char.IsAsciiLetter(text[0]))
+                return (text[..i].ToString(), text[(i + 1)..].ToString());
+        }
+        return ("", "");
+    }
+
     public static bool AreVersionsEquivalent(string? firstVersion, string? secondVersion)
     {
         if (string.IsNullOrWhiteSpace(firstVersion) || string.IsNullOrWhiteSpace(secondVersion))
