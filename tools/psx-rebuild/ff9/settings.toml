@@ -1,0 +1,41 @@
+# psxrecomp user settings for the rebuilt FF9 (framework 09ba00ed).
+[video]
+vsync = "on"
+renderer = "opengl"
+window_width = 2560
+fast_boot = false
+bios_hle = false
+fullscreen = 2
+frame_interpolation = true
+frame_interpolation_fps = 0
+aspect_ratio = "4:3"
+
+[audio]
+volume = 100
+frequency = 44100
+
+[launcher]
+skip_launcher = true
+
+[bios]
+path = "$HOME/QuiverLauncher/src/ff-newfw/ff9/psxrecomp/bios/SCPH1001.BIN"
+
+[disc]
+path = "$HOME/.local/share/QuiverLauncher/Apps/FinalFantasyIX-FinalFantasyIXRecompiled/disc/Final Fantasy IX (USA, Canada) (Disc 1) (Rev 1).cue"
+selected = 1
+
+[memcard]
+dir = "$HOME/.local/share/QuiverLauncher/Apps/FinalFantasyIX-FinalFantasyIXRecompiled/saves"
+card1 = "$HOME/.local/share/QuiverLauncher/Apps/FinalFantasyIX-FinalFantasyIXRecompiled/saves/card1.mcd"
+card2 = "$HOME/.local/share/QuiverLauncher/Apps/FinalFantasyIX-FinalFantasyIXRecompiled/saves/card2.mcd"
+enable1 = true
+enable2 = true
+
+[controller]
+p1_device = "auto"
+p1_mode = "digital"
+p1_deadzone = 3276
+multitap = false
+
+[localization]
+language = "en"

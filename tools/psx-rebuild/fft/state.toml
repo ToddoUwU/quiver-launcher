@@ -1,0 +1,54 @@
+format_version = 2
+
+[[package]]
+id = "fft.presentation.widescreen"
+version = "1.0.0"
+
+[[package]]
+id = "psx.enhancement.enhanced-audio"
+version = "1.0.0"
+
+[[package]]
+id = "psx.enhancement.image-filtering"
+version = "1.0.0"
+
+[[package]]
+id = "psx.enhancement.internal-resolution"
+version = "1.0.0"
+
+[[package]]
+id = "psx.enhancement.pgxp"
+version = "1.0.0"
+
+[[feature]]
+package_id = "fft.presentation.widescreen"
+id = "widescreen"
+enabled = true
+
+[[feature]]
+package_id = "psx.enhancement.enhanced-audio"
+id = "enhanced-audio"
+enabled = true
+
+[[feature]]
+package_id = "psx.enhancement.image-filtering"
+id = "image-filtering"
+enabled = true
+[feature.values]
+fmv_filtering = "bicubic"
+smoothing = "smooth"
+texture_filtering = "bilinear"
+
+[[feature]]
+package_id = "psx.enhancement.internal-resolution"
+id = "internal-resolution"
+enabled = true
+[feature.values]
+resolution = "12x"
+
+[[feature]]
+package_id = "psx.enhancement.pgxp"
+id = "pgxp"
+enabled = true
+[feature.values]
+cpu_mode = "true"
