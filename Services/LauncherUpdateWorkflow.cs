@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using QuiverLauncher.Core.Models;
 using QuiverLauncher.Models;
 using QuiverLauncher.ViewModels;
@@ -17,6 +18,7 @@ public sealed class LauncherUpdateWorkflow : IUpdateCheckWorkflow
     private readonly Func<Task> _refreshMods;
     private readonly Func<GameInfo, Task<bool>> _installAutomatically;
     private readonly VelopackUpdateService _velopackUpdateService;
+    private readonly Func<IReadOnlyCollection<string>, string?> _folderInUse;
     private App? _app => _application();
     private AppSettings _settings => _settingsModel.Current;
     private System.Collections.ObjectModel.ObservableCollection<GameInfo> Games => Library.Games;
@@ -24,7 +26,8 @@ public sealed class LauncherUpdateWorkflow : IUpdateCheckWorkflow
     private readonly object _autoGate = new();
     private Task<int>? _automaticUpdates;
     private bool _showAutoFailures;
-    public LauncherUpdateWorkflow(GameManager manager, SettingsViewModel settings, LibraryViewModel library, ShellViewModel shell, LauncherSession session, LauncherPromptService prompts, IUpdatePresentation presentation, Func<App?> application, VelopackUpdateService velopack, Func<Task> refreshMods, Func<GameInfo, Task<bool>> installAutomatically)
+    public LauncherUpdateWorkflow(GameManager manager, SettingsViewModel settings, LibraryViewModel library, ShellViewModel shell, LauncherSession session, LauncherPromptService prompts, IUpdatePresentation presentation, Func<App?> application, VelopackUpdateService velopack, Func<Task> refreshMods, Func<GameInfo, Task<bool>> installAutomatically,
+        Func<IReadOnlyCollection<string>, string?>? folderInUse = null)
     {
         _gameManager = manager;
         _settingsModel = settings;
@@ -37,6 +40,7 @@ public sealed class LauncherUpdateWorkflow : IUpdateCheckWorkflow
         _velopackUpdateService = velopack;
         _refreshMods = refreshMods;
         _installAutomatically = installAutomatically;
+        _folderInUse = folderInUse ?? (folders => RunningGames.FindFolderInUse(folders));
         if (AndroidLauncherUpdater.Current is {} android)
         {
             System.ComponentModel.PropertyChangedEventHandler changed = (_, _) => RefreshUpdateCheckStatus();
@@ -179,6 +183,12 @@ public sealed class LauncherUpdateWorkflow : IUpdateCheckWorkflow
             _session.Token.ThrowIfCancellationRequested();
             if (game.Status != GameStatus.UpdateAvailable)
                 continue;
+            // Replacing the files of a game being played can crash it, and a download competes with it and any stream of it.
+            if (GameBeingPlayed() is { } playing)
+            {
+                RetryAfterPlaying(playing);
+                break;
+            }
             try
             {
                 var installed = await _installAutomatically(game);
@@ -209,6 +219,27 @@ public sealed class LauncherUpdateWorkflow : IUpdateCheckWorkflow
         }
 
         return updated;
+    }
+
+    internal static TimeSpan PlayingRetryDelay { get; set; } = TimeSpan.FromMinutes(2);
+    private int _retryQueued;
+
+    private string? GameBeingPlayed() =>
+        _folderInUse(_gameManager.LibraryApps.Where(g => g.IsInstalled).Select(g => g.GetInstallPath(_gameManager.GamesFolder)).ToArray());
+
+    /// <summary>Waiting updates install soon after the game closes, wherever it was started from, with no need for a restart.</summary>
+    private void RetryAfterPlaying(string folder)
+    {
+        Trace.WriteLine($"Automatic updates wait until {Path.GetFileName(folder)} closes.");
+        Shell.UpdateCheckDetails = "Updates will install after the game you're playing closes.";
+        if (Interlocked.Exchange(ref _retryQueued, 1) == 1) return;
+        _ = _session.RunAsync(async () =>
+        {
+            try { await Task.Delay(PlayingRetryDelay, _session.Token); }
+            finally { Volatile.Write(ref _retryQueued, 0); }
+            // This pass has finished by now, so a new one starts rather than joining it.
+            await ApplyAutoUpdatesAsync(showFailureSummary: false);
+        });
     }
 
     private string _lastWaiting = "";

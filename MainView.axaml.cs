@@ -989,6 +989,9 @@ namespace QuiverLauncher
                 // The saved library is already usable.
                 await RefreshStartupMetadataAsync();
                 if (_session.IsClosed) return;
+                // Every app's status is fresh now. Otherwise updates wait for the first background check, an hour away,
+                // which a short session (a few minutes through Moonlight) never reaches.
+                _ = _session.RunAsync(() => _updates.ApplyAutoUpdatesAsync(showFailureSummary: false));
                 await _updates.ShowFirstRunWelcomeIfNeededAsync();
                 // After the welcome, so a new player's yes to usage data counts these too.
                 TrackLibraryLoaded();

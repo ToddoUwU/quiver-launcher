@@ -31,6 +31,8 @@ public static class GameDownloadInstallService
         var previousVersion = game.InstalledVersion;
         var rejectedFormatSwitch = false;
         var isUpdate = triggerStatus == GameStatus.UpdateAvailable;
+        // Read now: while it updates, a game doesn't count as installed.
+        var updatesWindowsCopy = isUpdate && !reinstall && GameDownloadService.InstalledCopyIsWindows(game, gamesFolder) == true;
         string? installingVersion = null;
         // A release to offer instead, when the one picked has lost its files.
         GitHubRelease? fallback = null;
@@ -182,7 +184,12 @@ public static class GameDownloadInstallService
             {
                 var gamePathForRunner = game.GetInstallPath(gamesFolder);
 
-                if (!WindowsRunnerService.IsWindowsRunnerAvailable(settings, game))
+                // A Windows build updating a Windows build keeps its Proton or Wine setup, which stays editable from the
+                // app's menu. Only a first install, a reinstall or a switch from a Linux build has anything to ask.
+                if (updatesWindowsCopy)
+                {
+                }
+                else if (!WindowsRunnerService.IsWindowsRunnerAvailable(settings, game))
                 {
                     if (!await dialogs.ConfirmDownloadWithoutRunnerAsync())
                     {

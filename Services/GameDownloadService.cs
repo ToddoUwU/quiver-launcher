@@ -58,7 +58,7 @@ public static class GameDownloadService
     }
 
     /// <summary>Whether the installed copy is a Windows build, from its record, its runner, then its folder. Null when that can't be told.</summary>
-    private static bool? InstalledCopyIsWindows(GameInfo game, string gamesFolder)
+    internal static bool? InstalledCopyIsWindows(GameInfo game, string gamesFolder)
     {
         if (!OperatingSystem.IsLinux() || !game.IsInstalled) return null;
         if (game.InstalledBuild is { } build) return PlatformAssetMatcher.IsWindowsAsset(build.FileName);
