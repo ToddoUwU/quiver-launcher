@@ -1,0 +1,117 @@
+#!/usr/bin/env bash
+# Tests `quiver-tv quit` (the Moonlight Quit hook) with stand-in processes, touching nothing real: a fake Sunshine starts
+# the tile the way Sunshine does (detached, through setsid), a fake Quiver starts two games, one that closes on SIGTERM and
+# a Wine-style one that has left its parent and its session and ignores SIGTERM, then the fake Sunshine runs the undo command.
+# Checks: another Sunshine's quit closes nothing; the games close before Quiver is asked to; Quiver, its script and the
+# script's helpers end; a Quiver outside the tile's session is never touched; while an update unpacks, the game closes at
+# once and Quiver only after the unpacking ends.   Usage: test-quiver-tv   (exit 0 = all passed, about 15 s)
+set -uo pipefail
+TV=$(dirname "$(readlink -f "$0")")/quiver-tv
+if pgrep -x -u "$USER" "QuiverLauncher." >/dev/null; then echo "Close Quiver first: starting the tile closes a running Quiver."; exit 2; fi
+T=$(mktemp -d --tmpdir quiver-tv-test.XXXXXX)
+export TV T XDG_STATE_HOME=$T/state XDG_DATA_HOME=$T/data QUIVER_TV_EXEC=$T/bin/quiver
+trap 'pkill -KILL -f "$T/" 2>/dev/null; rm -rf "$T"' EXIT
+mkdir -p "$T/data/QuiverLauncher/Apps/SomeGame" "$T/bin"
+MARKER=$T/data/QuiverLauncher/Apps/SomeGame/install-incomplete.txt
+cp /usr/bin/bash "$T/bin/QuiverLauncher.Desktop" # a process named like Quiver, with Quiver's executable name
+cp /usr/bin/sleep "$T/bin/unzip"                 # what Quiver runs to unpack an update
+
+# Stands in for ~/.local/bin/quiver: Quiver plus a helper that ends when Quiver does, like the settings watcher.
+cat >"$T/bin/quiver" <<'EOF'
+#!/usr/bin/env bash
+"$T/bin/QuiverLauncher.Desktop" "$T/bin/desktop.sh" &
+Q=$!
+( while kill -0 $Q 2>/dev/null; do sleep 0.1; done; echo "watcher saw Quiver close" >>"$T/events" ) &
+wait $Q; wait
+echo "script ended" >>"$T/events"
+EOF
+chmod +x "$T/bin/quiver"
+# Stands in for Quiver: starts the games, and when asked to close notes any game that was still running.
+cat >"$T/bin/desktop.sh" <<'EOF'
+gone() { local s; s=$(cut -d' ' -f3 "/proc/$1/stat" 2>/dev/null) || return 0; [[ $s == [ZX] ]]; }
+trap 'for g in game1 game2; do [[ -f $T/$g ]] && ! gone "$(cat "$T/$g")" && echo "$g still running when Quiver was asked to close" >>"$T/events"; done
+      echo "Quiver asked to close" >>"$T/events"; exit 0' TERM
+bash -c 'trap "exit 0" TERM; echo $$ >"$T/game1.tmp"; mv "$T/game1.tmp" "$T/game1"; while :; do sleep 0.1; done' &
+if [[ $(cat "$T/mode") == wine ]]; then
+  # like Wine: in a new session, its parent gone
+  bash -c '(trap "" TERM; echo $BASHPID >"$T/game2.tmp"; mv "$T/game2.tmp" "$T/game2"; exec setsid sleep 600) & exit 0'
+else
+  "$T/bin/unzip" 600 &
+  echo $! >"$T/unzip"
+fi
+while :; do sleep 0.1; done
+EOF
+
+fails=0
+pass() { echo "  ok    $*"; }
+fail() { echo "  FAIL  $*"; fails=$((fails + 1)); }
+gone() { local s; s=$(cut -d' ' -f3 "/proc/$1/stat" 2>/dev/null) || return 0; [[ $s == [ZX] ]]; }
+wait_for() { local i; for ((i = 0; i < 50; i++)); do eval "$1" && return 0; sleep 0.1; done; return 1; }
+check() { if eval "$2"; then pass "$1"; else fail "$1"; fi; }
+
+# Stands in for Sunshine: starts the tile as apps.json does, then quits it. The tile must be this shell's own child,
+# as it is Sunshine's, so it runs here and not in a subshell.
+start_tile() {
+  rm -f "$T"/game1 "$T"/game2 "$T"/unzip "$T"/events; : >"$T/events"; echo "$1" >"$T/mode"
+  SUNSHINE_APP_ID=3 setsid "$TV" 2>/dev/null &
+  TILE=$!
+  wait_for '[[ -f $T/game1 && ( -f $T/game2 || -f $T/unzip ) ]]' || { echo "the stand-in games never started"; exit 1; }
+  GAME1=$(cat "$T/game1")
+}
+
+echo "1. Quit with a well-behaved game and a Wine-style one"
+start_tile wine
+GAME2=$(cat "$T/game2")
+check "the tile has a session of its own" '[[ $(ps -o sid= -p $TILE | tr -d " ") == "$TILE" ]]'
+check "the session is remembered for this Sunshine" '[[ -f $XDG_STATE_HOME/quiver/tv-session.$$ ]]'
+check "the tile has a systemd scope of its own" '[[ $(cut -d" " -f3 "$XDG_STATE_HOME/quiver/tv-session.$$") == *.scope ]]'
+check "the Wine-style game has a session of its own" '[[ $(ps -o sid= -p $GAME2 | tr -d " ") == "$GAME2" ]]'
+check "the Wine-style game has left its parent" '[[ $(ps -o ppid= -p $GAME2 | tr -d " ") != $(pgrep -f "$T/bin/desktop.sh") ]]'
+setsid "$T/bin/QuiverLauncher.Desktop" -c 'sleep 600' &
+DESK=$!
+bash -c 'SUNSHINE_APP_ID=3 "$1" quit; :' _ "$TV" 2>/dev/null # a different Sunshine ("; :" keeps bash from exec'ing quit as itself)
+check "another Sunshine's quit closes nothing" '! gone $GAME1 && ! gone $GAME2'
+began=$(date +%s.%N)
+SUNSHINE_APP_ID=3 "$TV" quit
+took=$(echo "$(date +%s.%N) - $began" | bc)
+check "both games closed" 'gone $GAME1 && gone $GAME2'
+check "the games were closed before Quiver was asked to" '! grep -q "still running" "$T/events" && grep -q "Quiver asked" "$T/events"'
+check "the game that ignored SIGTERM was forced" 'grep -q "forced: sleep($GAME2)" "$XDG_STATE_HOME/quiver/tv.log"'
+check "Quiver's script and its helper ended" 'wait_for "grep -q \"script ended\" \"\$T/events\"" && grep -q "watcher saw" "$T/events"'
+check "a Quiver outside the tile's session is untouched" '! gone $DESK'
+check "the session record is gone" '[[ ! -e $XDG_STATE_HOME/quiver/tv-session.$$ ]]'
+check "quit took $(printf %.1f "$took") s (game grace 6 s + Quiver)" '(( $(echo "$took < 9" | bc) ))'
+kill -KILL "$DESK"; wait "$DESK" 2>/dev/null
+
+echo "2. Quit while an update is unpacking"
+start_tile unzip
+UNZIP=$(cat "$T/unzip")
+: >"$MARKER"
+began=$(date +%s.%N)
+SUNSHINE_APP_ID=3 "$TV" quit
+took=$(echo "$(date +%s.%N) - $began" | bc)
+check "the game closed" 'gone $GAME1'
+check "Moonlight isn't kept waiting ($(printf %.1f "$took") s)" '(( $(echo "$took < 2" | bc) ))'
+check "the unpacking goes on" '! gone $UNZIP'
+sleep 1
+check "Quiver stays open while it unpacks" '! grep -q "Quiver asked" "$T/events"'
+kill "$UNZIP"; rm -f "$MARKER"
+check "Quiver closes once the unpacking is done" 'wait_for "grep -q \"script ended\" \"\$T/events\""'
+
+echo "3. Sunshine runs both commands through a shell"
+# A program named sunshine with a shell between it and each command: the two must still be paired.
+cp /usr/bin/bash "$T/bin/sunshine"
+"$T/bin/sunshine" -c '
+  echo $$ >"$T/sunshine.pid"; rm -f "$T"/game1 "$T"/game2; echo wine >"$T/mode"
+  SUNSHINE_APP_ID=3 sh -c "setsid \"\$1\" 2>/dev/null; :" _ "$TV" &
+  for i in $(seq 50); do [[ -f $T/game1 && -f $T/game2 ]] && break; sleep 0.1; done
+  cat "$T/game1" "$T/game2" >"$T/games3"
+  SUNSHINE_APP_ID=3 sh -c "\"\$1\" quit; :" _ "$TV"'
+read -r G1 G2 < <(tr '\n' ' ' <"$T/games3")
+check "the tile was remembered under the sunshine process" 'grep -q "for Sunshine $(cat "$T/sunshine.pid"), " "$XDG_STATE_HOME/quiver/tv.log"'
+check "both games closed" '[[ -n ${G2:-} ]] && gone $G1 && gone $G2'
+
+wait 2>/dev/null
+echo "log:"; sed 's/^/  /' "$XDG_STATE_HOME/quiver/tv.log"
+if ((fails)); then echo "$fails check(s) failed"; exit 1; fi
+echo "all passed"

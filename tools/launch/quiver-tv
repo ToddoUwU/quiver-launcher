@@ -1,29 +1,198 @@
 #!/usr/bin/env bash
-# Sunshine "Quiver Launcher" tile. Wayland can't raise a window that's already open, so a running Quiver closes and a
-# fresh one starts on the screen being streamed.
+# Sunshine "Quiver Launcher" tile.
+#   quiver-tv        the tile's command: close a running Quiver and start a fresh one on the screen being streamed
+#                    (Wayland can't raise a window that's already open)
+#   quiver-tv quit   the tile's undo command, which Sunshine runs when Moonlight quits the session: close the game that
+#                    is running, then Quiver, so the next tile (Steam, Desktop) starts clean. Saving is up to you.
+#                    Run by hand, it closes whatever a Quiver tile started.
+#
+# Sunshine starts this tile detached (`setsid quiver-tv` in apps.json), so it never tracks Quiver itself: quitting from
+# Moonlight only runs the undo command. To know what the tile started, the tile runs in a systemd scope of its own (a
+# cgroup, which no program can leave: Wine starts every Windows game in a new session, cut off from its parent) and in
+# a session of its own (from setsid; used alone where systemd can't be reached). Both are written to
+# ~/.local/state/quiver/tv-session.<pid of the Sunshine it runs under>, so each Sunshine (couch, bed) only closes what
+# its own tile started, never a Quiver opened at the desk.   Log: ~/.local/state/quiver/tv.log
 #
 # Controllers: this PC's own pad, left connected at the desk, would otherwise take player 1 from the pad Moonlight
 # passes through. For anything started from here, only Moonlight's pad counts. Set QUIVER_TV_KEEP_LOCAL_PADS=1 to keep them.
-[[ -n ${QUIVER_TV_KEEP_LOCAL_PADS:-} ]] || export SDL_GAMECONTROLLER_IGNORE_DEVICES=${QUIVER_TV_IGNORE_PADS:-0x045e/0x0b12}
+set -uo pipefail
+
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/quiver
+APPS=${XDG_DATA_HOME:-$HOME/.local/share}/QuiverLauncher/Apps
+QUIVER=${QUIVER_TV_EXEC:-$HOME/.local/bin/quiver} # what the tile starts (tests point it elsewhere)
+GAME_GRACE=6   # seconds a game gets to close by itself before it's forced
+QUIVER_GRACE=4 # the same for Quiver
+mkdir -p "$STATE"
+log() { echo "$(date '+%F %T') $*" >>"$STATE/tv.log"; }
+
+is_quiver() { [[ $(readlink "/proc/$1/exe" 2>/dev/null) == */QuiverLauncher.Desktop ]]; }
 
 running() {
   local pid
   for pid in $(pgrep -x -u "$USER" "QuiverLauncher."); do
-    [[ $(readlink "/proc/$pid/exe") == */QuiverLauncher.Desktop ]] && { echo "$pid"; return 0; }
+    is_quiver "$pid" && { echo "$pid"; return 0; }
   done
   return 1
 }
 
-APPS=${XDG_DATA_HOME:-$HOME/.local/share}/QuiverLauncher/Apps
+# /proc/PID/stat after the name: 1 state, 2 parent, 4 session, 20 start time. Pid and start time together name one
+# process for good, since pids get reused.
+stat_field() {
+  local s n=$2
+  s=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  s=${s##*) }; set -f; set -- $s; set +f
+  echo "${!n}"
+}
+alive() { local s; s=$(stat_field "$1" 1) && [[ $s != [ZX] ]]; }
+
+# The Sunshine this runs under: the nearest one up the process tree, so a shell in between changes nothing. Else the
+# parent (tests, or by hand).
+owner() {
+  local p=$PPID
+  while ((p > 1)); do
+    [[ $(cat "/proc/$p/comm" 2>/dev/null) == sunshine ]] && { echo "$p"; return; }
+    p=$(stat_field "$p" 2) || break
+  done
+  echo "$PPID"
+}
+
+unpacking() { compgen -G "$APPS/*/install-incomplete.txt" >/dev/null; }
+
+# Every process the tile started: members SESSION CGROUP
+members() {
+  { [[ -n $2 && -d /sys/fs/cgroup$2 ]] && find "/sys/fs/cgroup$2" -name cgroup.procs -exec cat {} + 2>/dev/null
+    ps -u "$UID" -o pid=,sid= | awk -v s="$1" '$2 == s { print $1 }'; } | sort -un
+}
+
+# Programs that are part of Quiver's own work, never a game: unpacking an update, and Steam if something opened it.
+EXTRACTORS=" unzip 7z 7za 7zr 7zz bsdtar tar unrar xz zstd gzip "
+
+# What to close first: game_pids SESSION CGROUP. Everything a Quiver there started (its games, and what they left
+# running), and anything else the tile started that isn't under the tile's own script. Spared: Quiver itself, the
+# script and its helpers (the settings watcher puts back settings after an update), unpacking, and Steam.
+game_pids() {
+  local sid=$1 pid ppid comm p
+  local -A parent=() name=() member=()
+  while read -r pid ppid comm; do parent[$pid]=$ppid; name[$pid]=$comm; done < <(ps -u "$UID" -o pid=,ppid=,comm=)
+  for pid in $(members "$1" "$2"); do [[ -n ${parent[$pid]+x} ]] && member[$pid]=1; done
+  for pid in "${!member[@]}"; do
+    [[ $pid == "$sid" || $pid == "$$" ]] && continue
+    is_quiver "$pid" && continue
+    [[ $EXTRACTORS == *" ${name[$pid]} "* ]] && continue
+    p=$pid
+    while :; do
+      [[ ${name[$p]} == steam ]] && continue 2
+      p=${parent[$p]}
+      [[ -n ${member[$p]+x} ]] || break # its parent is gone: left running by something, like a Windows game by Wine
+      is_quiver "$p" && break
+      [[ $p == "$sid" ]] && continue 2  # the script's helpers
+    done
+    echo "$pid"
+  done
+}
+
+quiver_pids() { local pid; for pid in $(members "$1" "$2"); do is_quiver "$pid" && echo "$pid"; done; }
+
+names() { local p; for p in "$@"; do printf '%s(%s) ' "$(cat "/proc/$p/comm" 2>/dev/null)" "$p"; done; }
+
+# Wine's own background programs. They hold nothing of the game's, and winedevice.exe ignores SIGTERM: waiting for them
+# made every Windows game's quit take the full grace time. They're stopped as soon as the game itself has closed.
+WINE_SERVICES=" wineserver winedevice.exe services.exe plugplay.exe svchost.exe rpcss.exe explorer.exe tabtip.exe xalia.exe conhost.exe winedbg "
+
+# close SECONDS PID...: ask them to close, wait until they have, and force what's left after SECONDS.
+close() {
+  local secs=$1 i p; shift
+  (($#)) || return 0
+  local -a wait_for=() left=()
+  for p in "$@"; do [[ $WINE_SERVICES == *" $(cat "/proc/$p/comm" 2>/dev/null) "* ]] || wait_for+=("$p"); done
+  kill -TERM "$@" 2>/dev/null
+  for ((i = 0; i < secs * 10; i++)); do
+    left=()
+    for p in "${wait_for[@]}"; do alive "$p" && left+=("$p"); done
+    ((${#left[@]})) || break
+    sleep 0.1
+  done
+  ((${#left[@]})) && log "  didn't close in ${secs}s, forced: $(names "${left[@]}")"
+  left=()
+  for p in "$@"; do alive "$p" && left+=("$p"); done
+  ((${#left[@]})) && kill -KILL "${left[@]}" 2>/dev/null
+  return 0
+}
+
+# quit_session SESSION START CGROUP: close the game the tile started, then Quiver.
+quit_session() {
+  local sid=$1 start=$2 cg=${3:-} round
+  local -a games quivers
+  # While the tile's script is still there, it must be the one recorded: a reused pid would be someone else's session.
+  if [[ -e /proc/$sid && $(stat_field "$sid" 20) != "$start" ]]; then
+    log "quit: session $sid now belongs to another program; nothing closed"
+    return 0
+  fi
+  # Twice: a game closing can start one last program (Wine, for one, can start its crash handler).
+  for round in 1 2; do
+    mapfile -t games < <(game_pids "$sid" "$cg")
+    ((${#games[@]})) || break
+    log "quit: closing the game: $(names "${games[@]}")"
+    close "$GAME_GRACE" "${games[@]}"
+  done
+  mapfile -t quivers < <(quiver_pids "$sid" "$cg")
+  if ((${#quivers[@]} == 0)); then log "quit: Quiver was already closed"; return 0; fi
+  if unpacking; then
+    # Closing Quiver while it unpacks a game update would leave that game half installed. Don't keep Moonlight waiting.
+    log "quit: a game update is unpacking; Quiver closes once it's done"
+    setsid -f "$0" quit-when-unpacked "$sid" "$cg" "${quivers[@]}" </dev/null >/dev/null 2>&1
+    return 0
+  fi
+  log "quit: closing Quiver: $(names "${quivers[@]}")"
+  close "$QUIVER_GRACE" "${quivers[@]}"
+}
+
+case ${1:-} in
+  quit)
+    # From Sunshine, its own tile's session only. By hand, every tile session.
+    if [[ -n ${SUNSHINE_APP_ID:-} ]]; then files=("$STATE/tv-session.$(owner)"); else files=("$STATE"/tv-session.*); fi
+    for f in "${files[@]}"; do
+      [[ -f $f ]] || continue
+      read -r sid start cg <"$f" && quit_session "$sid" "$start" "$cg"
+      rm -f "$f"
+    done
+    exit 0 ;;
+  quit-when-unpacked)
+    sid=$2 cg=$3; shift 3
+    for _ in {1..9000}; do unpacking || break; sleep 0.2; done # up to half an hour
+    quivers=()
+    in_tile=" $(members "$sid" "$cg" | tr '\n' ' ') "
+    for p in "$@"; do is_quiver "$p" && [[ $in_tile == *" $p "* ]] && quivers+=("$p"); done
+    log "quit: update unpacked; closing Quiver: $(names "${quivers[@]}")"
+    close "$QUIVER_GRACE" "${quivers[@]}"
+    exit 0 ;;
+esac
+
+# Remember what the tile starts, for `quit`, when started in a session of its own as the tile does. Started from a
+# terminal, the session is the terminal's, and closing it would close the terminal's programs too: nothing is kept then.
+CGROUP=
+if [[ $(stat_field $$ 4) == "$$" ]]; then
+  if [[ -z ${QUIVER_TV_SCOPED:-} ]] && systemctl --user show -p Version --value >/dev/null 2>&1; then
+    # Same process (systemd-run moves itself into the new scope and runs this again): same pid, session and parent.
+    export QUIVER_TV_SCOPED=1
+    exec systemd-run --user --scope --collect --quiet --description="Quiver Launcher tile (Sunshine $(owner))" -- "$0" "$@"
+  fi
+  [[ -n ${QUIVER_TV_SCOPED:-} ]] && CGROUP=$(sed -n 's/^0:://p' /proc/self/cgroup)
+  unset QUIVER_TV_SCOPED
+  for f in "$STATE"/tv-session.*; do [[ -e $f && ! -e /proc/${f##*.} ]] && rm -f "$f"; done # that Sunshine has stopped
+  OWNER=$(owner)
+  echo "$$ $(stat_field $$ 20) $CGROUP" >"$STATE/tv-session.$OWNER"
+  log "start: session $$ for Sunshine $OWNER, ${CGROUP:-no systemd scope, so the session alone: Windows games can stay open}"
+fi
+
+[[ -n ${QUIVER_TV_KEEP_LOCAL_PADS:-} ]] || export SDL_GAMECONTROLLER_IGNORE_DEVICES=${QUIVER_TV_IGNORE_PADS:-0x045e/0x0b12}
+
 if PID=$(running); then
   # Closing Quiver in the middle of unpacking a game update would leave that game half installed: give it time to finish.
-  for _ in {1..600}; do
-    compgen -G "$APPS/*/install-incomplete.txt" >/dev/null || break
-    sleep 0.2
-  done
+  for _ in {1..600}; do unpacking || break; sleep 0.2; done
   kill "$PID" 2>/dev/null
   # As soon as it's gone, not a fixed two seconds.
   for _ in {1..50}; do kill -0 "$PID" 2>/dev/null || break; sleep 0.1; done
   kill -9 "$PID" 2>/dev/null
 fi
-exec "$HOME/.local/bin/quiver"
+exec "$QUIVER"

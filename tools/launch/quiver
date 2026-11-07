@@ -95,8 +95,13 @@ build_in_background_if_changed() {
   [[ $(source_stamp) == $(cat "$STATE/build.stamp" 2>/dev/null) ]] && return 0
   [[ -e $STATE/build.running ]] && return 0
   say "the source changed: building for next time in the background"
-  ( trap 'rm -f "$STATE/build.running"' EXIT; : >"$STATE/build.running"; GUI=0; nice -n 10 "$0" build >/dev/null 2>&1 ) &
-  disown
+  # Apart from the Moonlight tile (a session and systemd scope of its own): quitting from Moonlight closes what the tile
+  # started (see quiver-tv), and a build cut off there would fail, or leave build.running behind and stop every later
+  # background build.
+  local run=(setsid -f)
+  systemctl --user show -p Version --value >/dev/null 2>&1 && run+=(systemd-run --user --scope --collect --quiet --)
+  "${run[@]}" bash -c 'f=$1/build.running; trap "rm -f \"$f\"" EXIT; : >"$f"; nice -n 10 "$2" build >/dev/null 2>&1' \
+    quiver-build "$STATE" "$0" </dev/null >/dev/null 2>&1
 }
 
 # The real launcher, not its test program (they share a process name).
