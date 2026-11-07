@@ -325,7 +325,7 @@ public sealed class LibraryLaunchController
             var choices = GameDownloadService.Prepare(game, latestRelease, _settings);
             // The build already installed, else the only one for this platform: either installs without a picker,
             // so automatic updates reach apps with several downloads too.
-            if ((GameDownloadService.InstalledBuildIn(game, choices, latestRelease) ?? choices.Automatic) is { } automatic)
+            if (GameDownloadService.ForUpdate(game, choices, latestRelease, _gameManager.GamesFolder) is { } automatic)
             {
                 // Install the release just revalidated above. Resolving again after
                 // applying it can lose the pin that selected this exact release.

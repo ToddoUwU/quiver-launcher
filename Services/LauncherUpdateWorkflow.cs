@@ -173,6 +173,7 @@ public sealed class LauncherUpdateWorkflow : IUpdateCheckWorkflow
             return 0;
         var updated = 0;
         var failures = new List<string>();
+        var waiting = new List<string>();
         foreach (var game in autoGames)
         {
             _session.Token.ThrowIfCancellationRequested();
@@ -183,6 +184,8 @@ public sealed class LauncherUpdateWorkflow : IUpdateCheckWorkflow
                 var installed = await _installAutomatically(game);
                 if (installed)
                     updated++;
+                else if (game.Status == GameStatus.UpdateAvailable)
+                    waiting.Add(game.Name);
             }
             catch (Exception ex)
             {
@@ -198,6 +201,7 @@ public sealed class LauncherUpdateWorkflow : IUpdateCheckWorkflow
         }
 
         RefreshUpdateCheckStatus();
+        ReportWaitingUpdates(waiting);
         NotifyUpdateCheckUiProperties();
         if (_showAutoFailures && failures.Count > 0 && _presentation.CanShowFailureSummary && !_settingsModel.KioskLocked)
         {
@@ -205,6 +209,23 @@ public sealed class LauncherUpdateWorkflow : IUpdateCheckWorkflow
         }
 
         return updated;
+    }
+
+    private string _lastWaiting = "";
+
+    /// <summary>Updates auto-update can't install by itself would otherwise sit unnoticed. Says so once, until the list changes.</summary>
+    private void ReportWaitingUpdates(List<string> waiting)
+    {
+        var names = string.Join(", ", waiting);
+        if (waiting.Count > 0)
+        {
+            var note = $"Waiting for you to choose a download: {names}";
+            Shell.UpdateCheckDetails = string.IsNullOrWhiteSpace(Shell.UpdateCheckDetails) ? note : $"{Shell.UpdateCheckDetails}\n{note}";
+        }
+        if (names == _lastWaiting) return;
+        _lastWaiting = names;
+        if (waiting.Count > 0)
+            DesktopNotification.Show("Quiver: an update needs you", $"Choose which download to install in Quiver: {names}");
     }
 
     bool IUpdateCheckWorkflow.CanPresentResults => _presentation.CanPresentResults && !_session.IsClosed;

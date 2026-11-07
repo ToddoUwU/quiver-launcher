@@ -4,15 +4,25 @@ public static class ReleaseVersionIdentity
 {
     public static string NormalizeVersionString(string? version)
     {
+        var segments = VersionSegments(version);
+        while (segments.Count < 3)
+            segments.Add("0");
+
+        return string.Join(".", segments.Take(4));
+    }
+
+    /// <summary>A version's numbers in order, however many: v0.0.8.8.3 has five, and the last can be all that changed.</summary>
+    private static List<string> VersionSegments(string? version)
+    {
+        var segments = new List<string>();
         if (string.IsNullOrWhiteSpace(version))
-            return "0.0.0";
+            return segments;
 
         var normalized = StripWordPrefix(StripBuildMetadata(version.Trim().TrimStart('v', 'V')));
         var labelAt = normalized.IndexOfAny(['-', ' ', '\t']);
         if (labelAt >= 0)
             normalized = normalized[..labelAt];
 
-        var segments = new List<string>();
         foreach (var part in normalized.Split('.', StringSplitOptions.RemoveEmptyEntries))
         {
             var digits = TakeLeadingDigits(part);
@@ -21,24 +31,22 @@ public static class ReleaseVersionIdentity
             segments.Add(digits);
         }
 
-        while (segments.Count < 3)
-            segments.Add("0");
-
-        return string.Join(".", segments.Take(4));
+        return segments;
     }
 
     public static bool IsNewerVersion(string candidateVersion, string baselineVersion)
     {
-        try
+        var candidate = VersionSegments(candidateVersion);
+        var baseline = VersionSegments(baselineVersion);
+        for (var i = 0; i < Math.Max(candidate.Count, baseline.Count); i++)
         {
-            var candidate = new Version(NormalizeVersionString(candidateVersion));
-            var baseline = new Version(NormalizeVersionString(baselineVersion));
-            return candidate.CompareTo(baseline) > 0;
+            var first = i < candidate.Count ? System.Numerics.BigInteger.Parse(candidate[i]) : System.Numerics.BigInteger.Zero;
+            var second = i < baseline.Count ? System.Numerics.BigInteger.Parse(baseline[i]) : System.Numerics.BigInteger.Zero;
+            if (first != second)
+                return first > second;
         }
-        catch
-        {
-            return false;
-        }
+
+        return false;
     }
 
     public static bool AreVersionsEquivalent(string? firstVersion, string? secondVersion)

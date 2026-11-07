@@ -62,6 +62,39 @@ public static class DownloadAssetPolicy
 
     private const string VersionMark = "\u0001";
 
+    private enum BuildSort { Windows, Flatpak, AppImage, Other }
+
+    private static BuildSort SortOf(string name) =>
+        name.Contains("flatpak", StringComparison.OrdinalIgnoreCase) ? BuildSort.Flatpak :
+        name.EndsWith(".appimage", StringComparison.OrdinalIgnoreCase) ? BuildSort.AppImage :
+        PlatformAssetMatcher.IsWindowsAsset(name) ? BuildSort.Windows : BuildSort.Other;
+
+    /// <summary>
+    /// The one file in <paramref name="choices"/> of the same sort as the installed file, for builds whose names change
+    /// in ways <see cref="MatchInstalled"/> can't pair: a commit hash (3SX-c6b8e98-linux.tar.gz) or a dashed version
+    /// (Game-Linux-Release-1-0-3.zip). Null unless exactly one fits.
+    /// </summary>
+    public static GitHubAsset? MatchSameSort(DownloadAssetSelection choices, string? installedFileName)
+    {
+        if (string.IsNullOrWhiteSpace(installedFileName)) return null;
+        var sort = SortOf(installedFileName.Trim());
+        var same = choices.Eligible.Where(a => SortOf(a.name) == sort).ToList();
+        if (sort == BuildSort.Windows) same = ForProcessor(same, DefaultProcessor("Windows"));
+        return same.Count == 1 ? same[0] : null;
+    }
+
+    /// <summary>
+    /// The one build in <paramref name="choices"/> for the system the installed copy runs on: a Linux copy's Linux
+    /// build, leaving out Flatpak bundles (they install elsewhere), or a Windows copy's Windows build. Null unless
+    /// exactly one fits, so a Windows download is never unpacked over a Linux install without asking.
+    /// </summary>
+    public static GitHubAsset? OnlyBuildFor(DownloadAssetSelection choices, bool windows)
+    {
+        var fits = choices.Eligible.Where(a => PlatformAssetMatcher.IsWindowsAsset(a.name) == windows && SortOf(a.name) != BuildSort.Flatpak).ToList();
+        if (windows) fits = ForProcessor(fits, DefaultProcessor("Windows"));
+        return fits.Count == 1 ? fits[0] : null;
+    }
+
     // A dotted version such as 1.2.0 or 1.2.0-beta.3. A single number isn't one: it may be x64, win32 or arm64.
     private static readonly Regex DottedVersion = new(@"(?<![0-9.])\d+(?:\.\d+)+(?:[-.]?(?:alpha|beta|rc|pre|preview)(?:[-.]?\d+)?)?(?![0-9])",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
