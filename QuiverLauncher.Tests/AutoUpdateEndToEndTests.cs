@@ -135,11 +135,10 @@ public sealed class AutoUpdateEndToEndTests : IDisposable
     {
         Assert.SkipUnless(OperatingSystem.IsLinux(), "Reads /proc.");
         var program = Path.Combine(GamePath, "game");
-        File.Copy(ResolveSleep(), program);
-        File.SetUnixFileMode(program, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        CopyProgramTo(program);
 
         RunningGames.FindFolderInUse([GamePath]).Should().BeNull("nothing has started yet");
-        using var game = Process.Start(new ProcessStartInfo(program, "30") { WorkingDirectory = _root })!;
+        using var game = Process.Start(new ProcessStartInfo(program, ["-c", KeepRunning]) { WorkingDirectory = _root })!;
         try
         {
             await WaitUntilAsync(() => RunningGames.FindFolderInUse([GamePath]) != null);
@@ -147,7 +146,7 @@ public sealed class AutoUpdateEndToEndTests : IDisposable
         }
         finally
         {
-            game.Kill();
+            game.Kill(entireProcessTree: true);
             await game.WaitForExitAsync(TestContext.Current.CancellationToken);
         }
         await WaitUntilAsync(() => RunningGames.FindFolderInUse([GamePath]) == null);
@@ -171,10 +170,9 @@ public sealed class AutoUpdateEndToEndTests : IDisposable
         var elsewhere = Path.Combine(_root, "proton");
         Directory.CreateDirectory(elsewhere);
         var runner = Path.Combine(elsewhere, "runner");
-        File.Copy(ResolveSleep(), runner);
-        File.SetUnixFileMode(runner, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        CopyProgramTo(runner);
 
-        using var shell = Process.Start(new ProcessStartInfo("/bin/sh", ["-c", "exec sleep 30"]) { WorkingDirectory = GamePath })!;
+        using var shell = Process.Start(new ProcessStartInfo("/bin/sh", ["-c", KeepRunning]) { WorkingDirectory = GamePath })!;
         try
         {
             await Task.Delay(200, TestContext.Current.CancellationToken);
@@ -182,28 +180,70 @@ public sealed class AutoUpdateEndToEndTests : IDisposable
         }
         finally
         {
-            shell.Kill();
+            shell.Kill(entireProcessTree: true);
             await shell.WaitForExitAsync(TestContext.Current.CancellationToken);
         }
 
-        using var proton = Process.Start(new ProcessStartInfo(runner, "30") { WorkingDirectory = GamePath })!;
+        using var proton = Process.Start(new ProcessStartInfo(runner, ["-c", KeepRunning]) { WorkingDirectory = GamePath })!;
         try
         {
             await WaitUntilAsync(() => RunningGames.FindFolderInUse([GamePath]) == GamePath);
         }
         finally
         {
-            proton.Kill();
+            proton.Kill(entireProcessTree: true);
             await proton.WaitForExitAsync(TestContext.Current.CancellationToken);
         }
     }
 
-    private static string ResolveSleep()
+    [Theory]
+    [InlineData(new[] { "readme.md", "data/level.pak" }, false)]
+    [InlineData(new[] { "version.txt", "selected_executable.txt" }, false)]
+    [InlineData(new[] { "lib/libgame.so", "lib/libgame.so.1", "game.dll", "notes.txt", "config.json" }, false)]
+    [InlineData(new[] { "readme.md", "game.exe" }, true)]
+    [InlineData(new[] { "deep/er/still/game.AppImage" }, true)]
+    [InlineData(new[] { "game.x86_64" }, true)]
+    [InlineData(new[] { "bin/run.sh" }, true)]
+    public void Stopping_at_the_first_program_agrees_with_listing_them_all(string[] files, bool expected)
     {
-        foreach (var path in new[] { "/usr/bin/sleep", "/bin/sleep" })
-            if (File.Exists(path))
-                return path;
-        throw new FileNotFoundException("sleep");
+        foreach (var file in files)
+        {
+            var path = Path.Combine(GamePath, file);
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, "not a program");
+        }
+        GameInstallationService.HasExecutableCandidate(GamePath, null).Should().Be(expected);
+        (GameInstallationService.FindExecutableCandidates(GamePath, SearchOption.AllDirectories, null, out _).Count > 0).Should().Be(expected);
+    }
+
+    [Fact]
+    public void Stopping_at_the_first_program_finds_a_native_program_by_its_contents()
+    {
+        Assert.SkipUnless(OperatingSystem.IsLinux(), "ELF programs.");
+        File.Copy("/bin/sh", Path.Combine(GamePath, "game"));
+        GameInstallationService.HasExecutableCandidate(GamePath, null).Should().BeTrue();
+    }
+
+    /// <summary>Run by hand against a real library: QUIVER_REAL_APPS=~/.local/share/QuiverLauncher/Apps. Only reads.</summary>
+    [Fact]
+    public void Stopping_at_the_first_program_agrees_on_every_real_game()
+    {
+        var apps = Environment.GetEnvironmentVariable("QUIVER_REAL_APPS");
+        Assert.SkipWhen(string.IsNullOrEmpty(apps), "Needs QUIVER_REAL_APPS.");
+        var folders = Directory.GetDirectories(apps!);
+        folders.Should().NotBeEmpty();
+        foreach (var folder in folders)
+            GameInstallationService.HasExecutableCandidate(folder, null).Should().Be(
+                GameInstallationService.FindExecutableCandidates(folder, SearchOption.AllDirectories, null, out _).Count > 0, folder);
+    }
+
+    private const string KeepRunning = "while :; do sleep 1; done";
+
+    /// <summary>A copy of the shell stands in for a game: unlike sleep, which can be one program with many names, it runs under any name.</summary>
+    private static void CopyProgramTo(string path)
+    {
+        File.Copy("/bin/sh", path);
+        File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
     }
 
     private static async Task WaitUntilAsync(Func<bool> condition)

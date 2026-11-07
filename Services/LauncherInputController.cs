@@ -112,7 +112,7 @@ public sealed class LauncherInputController : IDisposable
     }
 
 
-        private bool _isProcessingInput = false;
+        private bool _isProcessingInput;
 
         /// <summary>
         /// After Space/Enter confirm, suppress the matching KeyUp so a newly focused CheckBox

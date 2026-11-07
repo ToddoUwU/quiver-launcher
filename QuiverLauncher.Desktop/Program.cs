@@ -20,6 +20,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        StartupTimeline.Mark("main");
         AppInstallLaunch.Current = new DesktopAppInstallLaunchService();
 
         // Run() clears the updater's restart marker, which shows whether an update just failed.
@@ -41,7 +42,7 @@ internal static class Program
         var launch = KioskLaunch.Parse(args);
         args = launch.Args;
 
-        if (args.Length > 0 && args[0].StartsWith("-"))
+        if (args.Length > 0 && args[0].StartsWith('-'))
         {
             if (OperatingSystem.IsWindows())
             {
@@ -68,6 +69,13 @@ internal static class Program
         if (launch.Kiosk)
             KioskLaunch.ArmProcess();
 
+#if !DEBUG
+        // By default a trace line goes to syslog: a system call and a journal entry for each, even with nobody reading.
+        if (!LauncherDiagnostics.Enabled)
+            System.Diagnostics.Trace.Listeners.Clear();
+#endif
+        InputService.StartSdlInBackground = true;
+        StartupTimeline.Mark("before avalonia");
         BuildAvaloniaApp()
             .StartWithClassicDesktopLifetime(args);
         return 0;
@@ -152,10 +160,15 @@ internal static class Program
         var builder = AppBuilder.Configure<App>()
             .UsePlatformDetect()
             .WithInterFont()
-            .LogToTrace();
+            // A full library's artwork outgrows the default 28 MB, so scrolling kept uploading the same textures again.
+            .With(new SkiaOptions { MaxGpuResourceSizeBytes = 256L * 1024 * 1024 });
+
+        if (LauncherDiagnostics.Enabled)
+            builder = builder.LogToTrace();
 
         if (OperatingSystem.IsLinux())
-            builder = builder.With(new X11PlatformOptions { OverlayPopups = true });
+            // Session management only restores windows after a logout, which Quiver doesn't use; it costs a connection at startup.
+            builder = builder.With(new X11PlatformOptions { OverlayPopups = true, EnableSessionManagement = false });
 
         return builder;
     }

@@ -5,6 +5,18 @@ using Avalonia;
 
 namespace QuiverLauncher
 {
+    /// <summary>The same margin on all four sides, from a whole number of pixels.</summary>
+    public sealed class UniformThicknessConverter : IValueConverter
+    {
+        public static readonly UniformThicknessConverter Instance = new();
+
+        public object Convert(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+            value is int pixels ? new Thickness(pixels) : new Thickness(0);
+
+        public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>
+            throw new NotSupportedException();
+    }
+
     public class ThicknessConverter : IValueConverter
     {
         public static readonly ThicknessConverter Instance = new();

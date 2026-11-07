@@ -141,7 +141,9 @@ public sealed class HoverScrollText : Decorator
         SyncTypography();
         var width = double.IsInfinity(availableSize.Width) ? 0 : availableSize.Width;
         var heightConstraint = availableSize.Height;
-        _text.Measure(new Size(Math.Max(width, 0), heightConstraint));
+        // Scrolling needs the whole line; idle text ellipsizes to the space. Measuring here, once, rather than again
+        // during arrange, is what keeps layout from running in a cycle every time the row is hovered.
+        _text.Measure(new Size(IsActive ? double.PositiveInfinity : Math.Max(width, 0), heightConstraint));
         var height = _text.DesiredSize.Height;
         if (height <= 0)
             height = (FontSize > 0 ? FontSize : 12) * 1.35;
@@ -151,18 +153,7 @@ public sealed class HoverScrollText : Decorator
 
     protected override Size ArrangeOverride(Size finalSize)
     {
-        var arrangeWidth = finalSize.Width;
-        if (IsActive)
-        {
-            _text.TextTrimming = TextTrimming.None;
-            _text.Measure(new Size(double.PositiveInfinity, finalSize.Height));
-            arrangeWidth = Math.Max(_text.DesiredSize.Width, finalSize.Width);
-        }
-        else
-        {
-            _text.TextTrimming = TextTrimming.CharacterEllipsis;
-        }
-
+        var arrangeWidth = IsActive ? Math.Max(_text.DesiredSize.Width, finalSize.Width) : finalSize.Width;
         _text.Arrange(new Rect(0, 0, arrangeWidth, finalSize.Height));
         return finalSize;
     }
@@ -189,7 +180,7 @@ public sealed class HoverScrollText : Decorator
     {
         StopScroll(reset: false);
         _text.TextTrimming = TextTrimming.None;
-        InvalidateArrange();
+        InvalidateMeasure();
         Dispatcher.UIThread.Post(BeginScrollIfNeeded, DispatcherPriority.Render);
     }
 
@@ -206,7 +197,8 @@ public sealed class HoverScrollText : Decorator
         if (!IsActive)
             return;
 
-        _text.Measure(new Size(double.PositiveInfinity, Bounds.Height > 0 ? Bounds.Height : double.PositiveInfinity));
+        // Layout measured the whole line (see MeasureOverride), so only an unfinished layout pass needs another look.
+        UpdateLayout();
         var textWidth = _text.DesiredSize.Width;
         var viewport = Bounds.Width;
         if (textWidth <= viewport + 1 || viewport <= 0)
@@ -219,8 +211,7 @@ public sealed class HoverScrollText : Decorator
         _travel = TimeSpan.FromSeconds(Math.Clamp(_distance / 36.0, 1.0, 8.0));
         _phase = Phase.Out;
         _phaseStarted = DateTime.UtcNow;
-        _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(16) };
-        _timer.Tick += OnTick;
+        _timer ??= new DispatcherTimer(TimeSpan.FromMilliseconds(16), DispatcherPriority.Render, OnTick);
         _timer.Start();
     }
 
@@ -271,19 +262,14 @@ public sealed class HoverScrollText : Decorator
 
     private void StopScroll(bool reset)
     {
-        if (_timer != null)
-        {
-            _timer.Tick -= OnTick;
-            _timer.Stop();
-            _timer = null;
-        }
+        _timer?.Stop();
 
         _phase = Phase.Idle;
         if (reset)
         {
             _transform.X = 0;
             _text.TextTrimming = TextTrimming.CharacterEllipsis;
-            InvalidateArrange();
+            InvalidateMeasure();
         }
     }
 }

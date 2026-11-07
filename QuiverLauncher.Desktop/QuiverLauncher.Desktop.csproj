@@ -15,6 +15,20 @@
 		<RuntimeIdentifiers>win-x64;linux-x64;linux-arm64;osx-x64;osx-arm64</RuntimeIdentifiers>
 	</PropertyGroup>
 
+	<!--
+		The build ~/.local/bin/quiver runs: dotnet publish -r linux-x64 -p:QuiverFastStart=true.
+		The app and the .NET libraries are compiled ahead of time together, so starting needs almost no JIT. TieredPGO adds
+		profiling to code on its way to being re-optimized, which pays off in long-running servers, not in a launcher that
+		spends its time waiting: measured, startup used 20% less CPU without it.
+	-->
+	<PropertyGroup Condition="'$(QuiverFastStart)' == 'true'">
+		<SelfContained>true</SelfContained>
+		<PublishReadyToRun>true</PublishReadyToRun>
+		<PublishReadyToRunComposite>true</PublishReadyToRunComposite>
+		<TieredPGO>false</TieredPGO>
+		<SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+	</PropertyGroup>
+
 	<PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
 		<DefineConstants>$(DefineConstants);WINDOWS</DefineConstants>
 	</PropertyGroup>

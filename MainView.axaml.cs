@@ -91,8 +91,8 @@ namespace QuiverLauncher
         private InputService? _inputService => _input?.Service;
 
         private readonly GamepadNavigationService _gamepadNavigation = new();
-        private bool _handlingGamepadConfirm = false;
-        private bool _hasInitializedFocus = false;
+        private bool _handlingGamepadConfirm;
+        private bool _hasInitializedFocus;
         private bool _closing;
         internal Window? HostWindow => _desktopHost?.Window;
 
@@ -145,7 +145,9 @@ namespace QuiverLauncher
             _menus = new LauncherMenuController(this, () => LibraryPanel.Navigation.PreserveLibraryGamepadFocusWhileOpeningMenu(), () => LibraryPanel.Navigation.RestoreLibraryGamepadFocusAfterMenu());
             _markdownRenderer = new MarkdownRenderer(OpenUrl, () => Resources);
             _themeEditor = new ThemeEditor(secondary => secondary ? Shell.SecondaryColorBrush.Color : Shell.ThemeColorBrush.Color, ApplyThemeColor, _dialogs);
+            StartupTimeline.Mark("view: services made");
             InitializeComponent();
+            StartupTimeline.Mark("view: xaml loaded");
             if (IsDesktopPlatform)
             {
                 HeaderTitleColumn.ColumnDefinitions = new ColumnDefinitions("*,Auto");
@@ -348,8 +350,10 @@ namespace QuiverLauncher
                 PlayLauncherMusic(_music.Path);
             }
 
+            StartupTimeline.Mark("view: configured");
             _input = new LauncherInputController(this, () => _settings, SettingsPanel.Bindings, () => IsHostActive, () => MessagePromptOverlay.IsVisible, () => MessagePromptOverlay.Dismiss(), new(HandleGamepadNavigation, HandleConfirmAction, HandleCancelAction, HandleOptionsAction, HandleGamepadConnectionChanged, ActivateKeyboardNavChrome), dependencies.EnableInput);
             _input.OnKioskUnlock = () => _ = ToggleKioskFromChordAsync();
+            StartupTimeline.Mark("view: input ready");
             UpdateGamepadChromeClass();
             UpdateGamepadHintsBar();
             SettingsPanel.Bindings.Refresh();
@@ -881,7 +885,7 @@ namespace QuiverLauncher
                 var velopackVersion = _velopackUpdateService.CurrentVersion;
                 if (!string.IsNullOrWhiteSpace(velopackVersion))
                 {
-                    Shell.Version = velopackVersion.StartsWith("v", StringComparison.OrdinalIgnoreCase) ? velopackVersion : $"v{velopackVersion}";
+                    Shell.Version = velopackVersion.StartsWith('v') || velopackVersion.StartsWith('V') ? velopackVersion : $"v{velopackVersion}";
                     return;
                 }
 
@@ -959,11 +963,13 @@ namespace QuiverLauncher
         private void MobileLibrarySortItem_Click(object? sender, RoutedEventArgs e) => LibraryFiltersPanel.SelectSort((sender as MenuItem)?.Tag as string);
         internal async Task InitializeGamesAsync()
         {
+            StartupTimeline.Mark("view ready");
             Library.BeginInitialLoad();
             try
             {
                 // Startup must not wait for catalog servers, release checks, or rate-limit cooldowns.
                 await Task.Run(() => _gameManager.ReloadLibraryFromDiskAsync(allowNetwork: false), _session.Token);
+                StartupTimeline.Mark("library read");
                 if (_session.IsClosed)
                     return;
                 _settings = _settingsViewModel.Load();
@@ -986,8 +992,10 @@ namespace QuiverLauncher
 
                     Banners.ApplyTopBanner();
                 });
+                StartupTimeline.Mark("library shown");
                 // The saved library is already usable.
                 await RefreshStartupMetadataAsync();
+                StartupTimeline.Mark("online data read");
                 if (_session.IsClosed) return;
                 // Every app's status is fresh now. Otherwise updates wait for the first background check, an hour away,
                 // which a short session (a few minutes through Moonlight) never reaches.

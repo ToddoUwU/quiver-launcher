@@ -11,17 +11,27 @@ public sealed record DownloadAssetSelection(IReadOnlyList<GitHubAsset> Eligible,
     public bool NeedsChoice => Eligible.Count > 1 || Eligible.Count == 0 && Uncertain.Count > 0;
 }
 
-public static class DownloadAssetPolicy
+public static partial class DownloadAssetPolicy
 {
+    [GeneratedRegex(@"\.(?:ya?ml|blockmap|zsync)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex UpdateFeedPattern { get; }
+
+    [GeneratedRegex(@"(?:^|[._\s-])(?:notices?|sources?|source[._\s-]code|src)\.(?:zip|7z|rar|tar(?:\.(?:gz|xz|bz2|zst))?|tgz|tbz2|txz)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex SourceArchivePattern { get; }
+
+    [GeneratedRegex(@"(?:\.(?:sha(?:1|224|256|384|512)?|md5|sig|asc|minisig|signature|debug)(?:\.txt)?$)|(?:^|[._-])(?:checksums?|sha(?:1|224|256|384|512)?sums?|md5sums?|pdb|dsym|symbols|debugsymbols|debug[._-]symbols)(?:$|[._-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+    private static partial Regex ChecksumOrSymbolsPattern { get; }
+
+    [GeneratedRegex(@"(?:linux|appimage|flatpak|android|arm64-v8a|switch|\.apk$|\.deb$|\.rpm$|\.tar\.(?:gz|xz)$)", RegexOptions.IgnoreCase)]
+    private static partial Regex OtherPlatformPattern { get; }
+
     public static bool IsAuxiliary(string name) =>
         name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) ||
         // Electron's update feeds (latest-linux.yml), delta maps and AppImage zsync files describe a download.
-        Regex.IsMatch(name, @"\.(?:ya?ml|blockmap|zsync)\z", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
+        UpdateFeedPattern.IsMatch(name) ||
         // Only trailing, separated archive labels: app names such as Resource or SourceGame remain valid.
-        Regex.IsMatch(name, @"(?:^|[._\s-])(?:notices?|sources?|source[._\s-]code|src)\.(?:zip|7z|rar|tar(?:\.(?:gz|xz|bz2|zst))?|tgz|tbz2|txz)\z",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant) ||
-        Regex.IsMatch(name, @"(?:\.(?:sha(?:1|224|256|384|512)?|md5|sig|asc|minisig|signature|debug)(?:\.txt)?$)|(?:^|[._-])(?:checksums?|sha(?:1|224|256|384|512)?sums?|md5sums?|pdb|dsym|symbols|debugsymbols|debug[._-]symbols)(?:$|[._-])",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+        SourceArchivePattern.IsMatch(name) ||
+        ChecksumOrSymbolsPattern.IsMatch(name);
 
     /// <param name="machine">The processor the download will run on; by default the one in this computer.</param>
     public static DownloadAssetSelection Select(GitHubRelease release, string platform, string? filter = null,
@@ -151,5 +161,5 @@ public static class DownloadAssetPolicy
     private static bool HasKnownPlatform(string name) => PlatformAssetMatcher.IsIosAsset(name) ||
         PlatformAssetMatcher.IsDedicatedDeviceAsset(name) || PlatformAssetMatcher.IsWindowsAsset(name) ||
         PlatformAssetMatcher.MatchesPlatform(name, "macOS") ||
-        Regex.IsMatch(name, @"(?:linux|appimage|flatpak|android|arm64-v8a|switch|\.apk$|\.deb$|\.rpm$|\.tar\.(?:gz|xz)$)", RegexOptions.IgnoreCase);
+        OtherPlatformPattern.IsMatch(name);
 }

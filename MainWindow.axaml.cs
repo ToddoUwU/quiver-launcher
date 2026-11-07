@@ -22,6 +22,7 @@ public partial class MainWindow : Window
         App.CurrentHostedMainView = new WeakReference<MainView>(View);
 
         _ = new DesktopHostController(this, View);
+        StartupTimeline.Mark("window made");
     }
 
     public void RestoreFromTray() => View.RestoreFromTray();

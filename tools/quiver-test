@@ -13,7 +13,7 @@ start=$(date +%s)
 (
   # shellcheck source=/dev/null
   . "$REPO/tools/isolated-env.sh"
-  trap 'rm -rf "$ISO_HOME"' EXIT
+  trap 'rm -rf "${ISO_HOME:?}"' EXIT
   # The memory cap protects the desktop session from a runaway build (it has killed the session once).
   exec_prefix=(); command -v systemd-run >/dev/null && exec_prefix=(systemd-run --user --scope --collect -q -p MemoryMax=8G)
   "${exec_prefix[@]}" dotnet test QuiverLauncher.Tests/QuiverLauncher.Tests.csproj -c Release \

@@ -151,7 +151,7 @@ public partial class App
             AvailableLauncherVersion = availableLauncherVersion,
         };
 
-    private bool IsKioskLocked()
+    private static bool IsKioskLocked()
     {
         if (TryGetHostedMainView() is { } view)
             return view.SettingsModel.KioskLocked;

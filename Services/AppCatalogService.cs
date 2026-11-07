@@ -155,11 +155,14 @@ namespace QuiverLauncher.Services
             }
         }
 
+        private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
+        private static readonly string[] LibraryKeys = ["apps", "standard", "experimental", "custom"];
+
         public async Task SaveLocalAppsAsync(List<GameInfo> apps)
         {
             ArgumentNullException.ThrowIfNull(apps);
             var bytes = JsonSerializer.SerializeToUtf8Bytes(new { apps = apps.Select(SerializeApp).ToList() },
-                new JsonSerializerOptions { WriteIndented = true });
+                Indented);
             await _libraryStore.SaveAsync(bytes).ConfigureAwait(false);
         }
 
@@ -182,14 +185,13 @@ namespace QuiverLauncher.Services
                 apps = apps.Select(SerializeApp).ToList()
             };
 
-            var options = new JsonSerializerOptions { WriteIndented = true };
             var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None,
                     65536, FileOptions.Asynchronous))
                 {
-                    await JsonSerializer.SerializeAsync(stream, data, options).ConfigureAwait(false);
+                    await JsonSerializer.SerializeAsync(stream, data, Indented).ConfigureAwait(false);
                     await stream.FlushAsync().ConfigureAwait(false);
                     stream.Flush(flushToDisk: true);
                 }
@@ -245,7 +247,7 @@ namespace QuiverLauncher.Services
             }
 
             if (strict && (root.ValueKind != JsonValueKind.Object ||
-                !new[] { "apps", "standard", "experimental", "custom" }.Any(key => root.TryGetProperty(key, out _))))
+                !LibraryKeys.Any(key => root.TryGetProperty(key, out _))))
                 throw new JsonException("Expected an apps array or a supported legacy library.");
 
             if (root.TryGetProperty("apps", out var appsArray))

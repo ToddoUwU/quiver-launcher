@@ -93,6 +93,12 @@ public static class WindowsRunnerService
         RuntimeInformation.IsOSPlatform(OSPlatform.Linux) &&
         (IsCommandAvailable("wine64") || IsCommandAvailable("wine"));
 
+    public static string? FirstDetectedProtonExecutable()
+    {
+        var detected = ListDetectedProtonInstallations();
+        return detected.Count > 0 ? detected[0].ProtonExecutable : null;
+    }
+
     public static IReadOnlyList<ProtonInstallationInfo> ListDetectedProtonInstallations()
     {
         if (!RuntimeInformation.IsOSPlatform(OSPlatform.Linux))

@@ -415,7 +415,7 @@ public partial class BrowseDetailsView : UserControl, IFeatureNavigationHandler
         var maker = FirstText(Model.Project?.Author, app.Developer?.Name);
         if (maker != null) rows.Add(("Made by", maker));
         rows.Add(("Supported platforms", app.SupportedOS.Count == 0 ? "Not confirmed yet"
-            : BrowseText.PlatformNames(new[] { "windows", "macos", "linux", "android", "ios" }.Where(app.SupportedOS.Contains))));
+            : BrowseText.PlatformNames(BrowseText.PlatformOrder.Where(app.SupportedOS.Contains))));
         rows.Add(("Latest release", app.LastReleaseAt == null ? "No releases found"
             : string.Join(" · ", new[] { app.LastReleaseVersion ?? "", BrowseText.ReleaseAge(app.LastReleaseAt, DateTimeOffset.UtcNow) }.Where(t => t.Length > 0))));
         rows.Add(("Verified release", app.Verified?.Version is { Length: > 0 } verified ? verified : "None yet"));

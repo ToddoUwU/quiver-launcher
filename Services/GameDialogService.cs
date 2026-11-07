@@ -58,7 +58,7 @@ public static class GameDialogService
                 SuggestedStartLocation = folder != null ? await owner.StorageProvider.TryGetFolderFromPathAsync(folder) : null,
                 FileTypeFilter = [new FilePickerFileType("Windows executable") { Patterns = ["*.exe"] }],
             });
-            return files.FirstOrDefault()?.TryGetLocalPath();
+            return files.Count > 0 ? files[0].TryGetLocalPath() : null;
         });
     }
 
@@ -321,7 +321,7 @@ public static class GameDialogService
                 Kind = kind,
                 PrefixPath = existing?.PrefixPath ?? WindowsRunnerService.GetDefaultPrefixPathForKind(kind, gamePath),
                 ProtonPath = existing?.ProtonPath
-                             ?? WindowsRunnerService.ListDetectedProtonInstallations().FirstOrDefault()?.ProtonExecutable,
+                             ?? WindowsRunnerService.FirstDetectedProtonExecutable(),
                 CustomLaunchCommand = existing?.CustomLaunchCommand,
             };
         }
@@ -349,7 +349,7 @@ public static class GameDialogService
             }
 
             if (string.IsNullOrWhiteSpace(initial.ProtonPath))
-                initial.ProtonPath = protons.FirstOrDefault()?.ProtonExecutable;
+                initial.ProtonPath = protons.Count > 0 ? protons[0].ProtonExecutable : null;
 
             var runnerCombo = new ComboBox
             {

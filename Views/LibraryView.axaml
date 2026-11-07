@@ -195,7 +195,7 @@
 					<Grid ClipToBounds="True">
 						<!-- Background Image -->
 						<Panel ClipToBounds="True"
-							Margin="{Binding $parent[views:LibraryView].Model.Settings.IconMargin}"
+							Margin="{Binding $parent[views:LibraryView].Model.Settings.IconMargin, Converter={x:Static local:UniformThicknessConverter.Instance}}"
 							VerticalAlignment="Top"
 							HorizontalAlignment="Center">
 							<Border CornerRadius="12" ClipToBounds="True">
@@ -418,7 +418,7 @@
 							ClipToBounds="True"
 							HorizontalAlignment="Stretch">
 						<Panel ClipToBounds="True"
-							   Margin="{Binding $parent[views:LibraryView].Model.Settings.IconMargin}">
+							   Margin="{Binding $parent[views:LibraryView].Model.Settings.IconMargin, Converter={x:Static local:UniformThicknessConverter.Instance}}">
 							<asyncImageLoader:AdvancedImage Source="{Binding IconUrl}"
 								ClipToBounds="True"
 								VerticalAlignment="Center"

@@ -906,17 +906,22 @@ namespace QuiverLauncher.Models
         // Nothing to release: the button icons are shared.
         public void Dispose() { }
 
+        // One shared brush for each state: every card reads this, and a status change reads it again.
+        private static readonly IBrush DefaultButtonBrush = new Avalonia.Media.Immutable.ImmutableSolidColorBrush(Color.FromRgb(0, 122, 255));
+        private static readonly IBrush InstalledButtonBrush = new Avalonia.Media.Immutable.ImmutableSolidColorBrush(Color.FromRgb(52, 199, 89));
+        private static readonly IBrush UpdateButtonBrush = new Avalonia.Media.Immutable.ImmutableSolidColorBrush(Color.FromRgb(255, 149, 0));
+        private static readonly IBrush BusyButtonBrush = new Avalonia.Media.Immutable.ImmutableSolidColorBrush(Color.FromRgb(142, 142, 147));
+
         public IBrush ButtonColor
         {
             get
             {
                 return Status switch
                 {
-                    GameStatus.NotInstalled => new SolidColorBrush(Color.FromRgb(0, 122, 255)),
-                    GameStatus.Installed => new SolidColorBrush(Color.FromRgb(52, 199, 89)),
-                    GameStatus.UpdateAvailable => new SolidColorBrush(Color.FromRgb(255, 149, 0)),
-                    GameStatus.Downloading or GameStatus.Installing => new SolidColorBrush(Color.FromRgb(142, 142, 147)),
-                    _ => new SolidColorBrush(Color.FromRgb(0, 122, 255))
+                    GameStatus.Installed => InstalledButtonBrush,
+                    GameStatus.UpdateAvailable => UpdateButtonBrush,
+                    GameStatus.Downloading or GameStatus.Installing => BusyButtonBrush,
+                    _ => DefaultButtonBrush,
                 };
             }
         }
@@ -1500,9 +1505,8 @@ namespace QuiverLauncher.Models
 
         private static string GetUrlHash(string url)
         {
-            using var sha256 = System.Security.Cryptography.SHA256.Create();
-            var hashBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(url));
-            return Convert.ToHexString(hashBytes).Substring(0, 16).ToLowerInvariant();
+            var hashBytes = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(url));
+            return Convert.ToHexStringLower(hashBytes.AsSpan(0, 8));
         }
 
         private void ClearImageFromMemory()
@@ -1923,7 +1927,7 @@ namespace QuiverLauncher.Models
 
             // Check for Windows
             if (HasAnyOf(assetNameLower, "windows", "win64", "win32", "win-x64", "win-x86", "-win.", "_win.", ".exe", ".msi") ||
-                System.Text.RegularExpressions.Regex.IsMatch(assetNameLower, @"[_-]win[_-]|[_-]win\d|^win[_-]"))
+                PlatformAssetMatcher.WindowsMarkerPattern.IsMatch(assetNameLower))
             {
                 // Exclude false positives
                 if (!HasAnyOf(assetNameLower, "linux", "macos", "darwin", ".deb", ".rpm", "appimage", ".dmg"))

@@ -20,7 +20,7 @@ public sealed class ThemeEditor
         _applyColor = applyColor;
         _dialogs = dialogs;
     }
-        private bool IsLightColor(Color color)
+        private static bool IsLightColor(Color color)
         {
             // Calculate perceived brightness using standard formula
             double brightness = (0.299 * color.R + 0.587 * color.G + 0.114 * color.B) / 255;
@@ -28,7 +28,7 @@ public sealed class ThemeEditor
         }
 
         // Theme Color Shades
-        private Color GetShadedColor(Color baseColor, double factor)
+        private static Color GetShadedColor(Color baseColor, double factor)
         {
             byte r = (byte)Math.Min(255, Math.Max(0, baseColor.R * factor));
             byte g = (byte)Math.Min(255, Math.Max(0, baseColor.G * factor));
@@ -86,7 +86,7 @@ public sealed class ThemeEditor
             resources["MenuFlyoutSubItemChevronSubMenuOpened"] = tintedText;
         }
 
-        private double CalculateLuminance(Color color)
+        private static double CalculateLuminance(Color color)
         {
             return (0.299 * color.R + 0.587 * color.G + 0.114 * color.B) / 255;
         }
@@ -172,7 +172,7 @@ public sealed class ThemeEditor
             await ShowColorPresetsDialog(presets, true);
         }
 
-        private Color BlendColors(Color baseColor, Color blendColor, double blendAmount)
+        private static Color BlendColors(Color baseColor, Color blendColor, double blendAmount)
         {
             byte r = (byte)(baseColor.R * (1 - blendAmount) + blendColor.R * blendAmount);
             byte g = (byte)(baseColor.G * (1 - blendAmount) + blendColor.G * blendAmount);
@@ -336,7 +336,7 @@ public sealed class ThemeEditor
                         try
                         {
                             var text = hexBox.Text?.Trim();
-                            if (!string.IsNullOrEmpty(text) && text.StartsWith("#") && text.Length == 7)
+                            if (!string.IsNullOrEmpty(text) && text.StartsWith('#') && text.Length == 7)
                             {
                                 var color = Color.Parse(text);
                                 var (hue, sat, light) = RgbToHsl(color);
@@ -419,7 +419,7 @@ public sealed class ThemeEditor
             });
         }
 
-        private (StackPanel panel, Slider slider) CreateHslSlider(string label, double initialValue, double min, double max, string unit)
+        private static (StackPanel panel, Slider slider) CreateHslSlider(string label, double initialValue, double min, double max, string unit)
         {
             var panel = new StackPanel { Spacing = 5 };
 
@@ -468,7 +468,7 @@ public sealed class ThemeEditor
         }
 
         // Convert RGB to HSL
-        private (double h, double s, double l) RgbToHsl(Color color)
+        private static (double h, double s, double l) RgbToHsl(Color color)
         {
             double r = color.R / 255.0;
             double g = color.G / 255.0;
@@ -527,7 +527,7 @@ public sealed class ThemeEditor
             );
         }
 
-        private double HueToRgb(double p, double q, double t)
+        private static double HueToRgb(double p, double q, double t)
         {
             if (t < 0) t += 1;
             if (t > 1) t -= 1;

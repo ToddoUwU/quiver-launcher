@@ -43,7 +43,7 @@ namespace QuiverLauncher.Core.Services
                 return latest;
             return result with
             {
-                Releases = MergeLatestRelease(result.Releases, latest.Releases.FirstOrDefault()),
+                Releases = MergeLatestRelease(result.Releases, (latest.Releases.Count > 0 ? latest.Releases[0] : null)),
                 LatestTag = latest.LatestTag
             };
         }
@@ -64,7 +64,7 @@ namespace QuiverLauncher.Core.Services
                 new Uri($"https://api.github.com/repos/{repository}/releases/latest"), "github", token,
                 body => JsonSerializer.Deserialize<GitHubRelease>(body) is { } release ? [release] : [],
                 cancellationToken).ConfigureAwait(false);
-            return result with { LatestTag = result.Releases.FirstOrDefault()?.tag_name };
+            return result with { LatestTag = result.Releases.Count > 0 ? result.Releases[0].tag_name : null };
         }
 
         /// <summary>One release by its tag, as GitHub has it now; null when it's gone.</summary>
@@ -79,7 +79,7 @@ namespace QuiverLauncher.Core.Services
                 cancellationToken).ConfigureAwait(false);
             if (result.StatusCode == HttpStatusCode.NotFound) return null;
             result.EnsureSuccess();
-            return result.Releases.FirstOrDefault();
+            return result.Releases.Count > 0 ? result.Releases[0] : null;
         }
 
         public static async Task<GitHubRelease?> FetchLatestReleaseAsync(
@@ -90,7 +90,7 @@ namespace QuiverLauncher.Core.Services
             var result = await FetchLatestReleaseIndexAsync(httpClient, repository, token, etag, cancellationToken).ConfigureAwait(false);
             if (result.StatusCode == HttpStatusCode.NotFound) return null;
             result.EnsureSuccess();
-            return result.Releases.FirstOrDefault();
+            return result.Releases.Count > 0 ? result.Releases[0] : null;
         }
 
         /// <summary>

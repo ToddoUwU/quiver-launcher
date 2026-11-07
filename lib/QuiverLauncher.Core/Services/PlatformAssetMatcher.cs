@@ -4,7 +4,7 @@ using QuiverLauncher.Core.Models;
 
 namespace QuiverLauncher.Core.Services
 {
-    public static class PlatformAssetMatcher
+    public static partial class PlatformAssetMatcher
     {
         public static string GetPlatformIdentifier(TargetOS platform)
         {
@@ -174,34 +174,48 @@ namespace QuiverLauncher.Core.Services
             return false;
         }
 
+        // Compiled at build time: every release file of every app passes through these on each update check.
+        [GeneratedRegex(@"(?:^|[^a-z0-9])(?:ios|ipados|iphone|ipad|iphoneos|iphonesimulator)(?:$|[^a-z0-9])|\.ipa(?:$|[._-])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        private static partial Regex IosAssetPattern { get; }
+
+        [GeneratedRegex(@"(?:^|[^a-z0-9])(?:xbox|portmaster|stockos\d*|rg\d{2,3}[a-z0-9]*)(?:$|[^a-z0-9])", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
+        private static partial Regex DedicatedDevicePattern { get; }
+
+        [GeneratedRegex(@"(?:^|[^a-z0-9])mac(?:$|[^a-z0-9])")]
+        private static partial Regex MacMarkerPattern { get; }
+
+        [GeneratedRegex(@"(?:^|[._-])(?:pdb|symbols|debugsymbols|debug[._-]symbols)(?:$|[._-])")]
+        private static partial Regex DebugSymbolPattern { get; }
+
+        [GeneratedRegex(@"[_-]win[_-]|[_-]win\d|^win[_-]")]
+        internal static partial Regex WindowsMarkerPattern { get; }
+
         // Match platform tokens, not substrings such as "BIOS" or "Studios".
         // iOS is a known incompatible platform, not an unknown desktop archive.
         public static bool IsIosAsset(string assetName) =>
-            Regex.IsMatch(assetName, @"(?:^|[^a-z0-9])(?:ios|ipados|iphone|ipad|iphoneos|iphonesimulator)(?:$|[^a-z0-9])|\.ipa(?:$|[._-])",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            IosAssetPattern.IsMatch(assetName);
 
         // These packages target a console or a dedicated handheld environment, even
         // when that environment uses Windows/Linux internally. Do not treat them as
         // generic desktop archives or offer them as unknown downloads.
         public static bool IsDedicatedDeviceAsset(string assetName) =>
-            Regex.IsMatch(assetName, @"(?:^|[^a-z0-9])(?:xbox|portmaster|stockos\d*|rg\d{2,3}[a-z0-9]*)(?:$|[^a-z0-9])",
-                RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+            DedicatedDevicePattern.IsMatch(assetName);
 
         private static bool HasNonWindowsPlatformMarker(string assetNameLower) =>
             HasAnyOf(assetNameLower, NonWindowsPlatformMarkers) || HasMacPlatformMarker(assetNameLower);
 
         private static bool HasMacPlatformMarker(string assetNameLower) =>
             HasAnyOf(assetNameLower, "macos", "osx", "darwin", ".dmg", ".pkg", "apple") ||
-            Regex.IsMatch(assetNameLower, @"(?:^|[^a-z0-9])mac(?:$|[^a-z0-9])");
+            MacMarkerPattern.IsMatch(assetNameLower);
 
         private static bool IsDebugSymbolPackage(string assetNameLower) =>
-            Regex.IsMatch(assetNameLower, @"(?:^|[._-])(?:pdb|symbols|debugsymbols|debug[._-]symbols)(?:$|[._-])");
+            DebugSymbolPattern.IsMatch(assetNameLower);
 
         private static bool HasExplicitWindowsMarker(string assetNameLower) =>
             HasAnyOf(assetNameLower,
                 "windows", "win64", "win32", "win-x64", "win-x86",
                 "-win.", "_win.", ".exe", ".msi", "msvc", "mingw") ||
-            Regex.IsMatch(assetNameLower, @"[_-]win[_-]|[_-]win\d|^win[_-]");
+            WindowsMarkerPattern.IsMatch(assetNameLower);
 
         private static bool IsUnlabeledWindowsArchive(string assetNameLower) =>
             assetNameLower.EndsWith(".zip", StringComparison.Ordinal) ||

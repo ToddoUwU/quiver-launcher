@@ -20,13 +20,21 @@ namespace QuiverLauncher.Services
         private readonly Dictionary<SDL_JoystickID, GamepadSample> _gamepadStates = new();
         private readonly Dictionary<SDL_JoystickID, OpenGamepad> _gameControllers = new();
         private Dictionary<GamepadAction, List<GamepadBinding>> _bindings = GamepadBindingDefaults.Create();
-        private bool _disposed = false;
+        private bool _disposed;
         private bool _isWindowActive = true;
         private bool _captureMode;
         // Set when the native SDL3 library cannot be loaded; gamepad input is then unavailable.
         private bool _sdlLibraryMissing;
 
-        private bool SdlAvailable => PlatformCapabilities.SupportsGamepadSdl && !_sdlLibraryMissing;
+        private bool SdlAvailable => PlatformCapabilities.SupportsGamepadSdl && !_sdlLibraryMissing && _sdlStarted;
+
+        /// <summary>
+        /// Starts SDL on a worker thread rather than the UI thread, where it held up the first picture by a third of a second
+        /// looking through USB and Bluetooth devices. The real launcher turns this on; tests read pads straight after creating this.
+        /// </summary>
+        internal static bool StartSdlInBackground { get; set; }
+        private volatile bool _sdlStarted;
+        private Task? _sdlStartup;
 
         // Gamepad deadzone threshold
         private const float DeadZone = 0.3f;
@@ -85,7 +93,11 @@ namespace QuiverLauncher.Services
             _modalDialogNavigation.Configure(this);
             _contextMenuNavigation.Configure(this);
             ApplyBindings(appSettings.GamepadBindings);
-            InitializeSDL();
+            if (StartSdlInBackground && PlatformCapabilities.SupportsGamepadSdl)
+                // The poll timer finds the pads once this finishes.
+                _sdlStartup = Task.Run(StartSdl);
+            else if (StartSdl())
+                RefreshConnectedControllers();
 
             if (appSettings.EnableGamepadInput)
             {
@@ -245,10 +257,11 @@ namespace QuiverLauncher.Services
             RefreshConnectedControllers();
         }
 
-        private void InitializeSDL()
+        /// <summary>False when there's no working SDL, and gamepad input stays off.</summary>
+        private bool StartSdl()
         {
             if (!PlatformCapabilities.SupportsGamepadSdl)
-                return;
+                return false;
 
             try
             {
@@ -259,7 +272,7 @@ namespace QuiverLauncher.Services
                 if (!SDL_Init(SDL_InitFlags.SDL_INIT_GAMEPAD))
                 {
                     System.Diagnostics.Debug.WriteLine($"SDL initialization failed: {SDL_GetError()}");
-                    return;
+                    return false;
                 }
             }
             catch (DllNotFoundException ex)
@@ -268,10 +281,11 @@ namespace QuiverLauncher.Services
                 // input rather than failing to open the launcher.
                 _sdlLibraryMissing = true;
                 System.Diagnostics.Debug.WriteLine($"SDL3 unavailable, gamepad input disabled: {ex.Message}");
-                return;
+                return false;
             }
 
-            RefreshConnectedControllers();
+            _sdlStarted = true;
+            return true;
         }
 
         public void SetGamepadEnabled(bool enabled)
@@ -287,27 +301,41 @@ namespace QuiverLauncher.Services
             }
         }
 
+        private static readonly TimeSpan PadPollInterval = TimeSpan.FromMilliseconds(16);
+        // With no pad connected only a new one matters, and a quarter of a second is soon enough to notice it.
+        private static readonly TimeSpan NoPadPollInterval = TimeSpan.FromMilliseconds(250);
+        // How often an open pad's tick also looks for pads coming and going: about twice a second.
+        private const int ConnectionCheckTickMask = 31;
+        private int _pollTicks;
+
         private void InitializeGamepadPolling()
         {
             _gamepadTimer = new DispatcherTimer
             {
-                Interval = TimeSpan.FromMilliseconds(16)
+                Interval = _gameControllers.Count == 0 ? NoPadPollInterval : PadPollInterval
             };
             _gamepadTimer.Tick += GamepadTimer_Tick;
             _gamepadTimer.Start();
         }
 
-        private void GamepadTimer_Tick(object? sender, EventArgs e) => PollGamepads();
+        private void GamepadTimer_Tick(object? sender, EventArgs e)
+        {
+            PollGamepads(refreshConnected: _gameControllers.Count == 0 || (++_pollTicks & ConnectionCheckTickMask) == 0);
+            var wanted = _gameControllers.Count == 0 ? NoPadPollInterval : PadPollInterval;
+            if (_gamepadTimer is { } timer && timer.Interval != wanted)
+                timer.Interval = wanted;
+        }
 
         /// <summary>Reads every open pad once and raises the actions it pressed. Runs on each timer tick.</summary>
-        internal void PollGamepads()
+        internal void PollGamepads(bool refreshConnected = true)
         {
             if (!SdlAvailable)
                 return;
 
             CheckSDLWindowFocus();
             SDL_UpdateGamepads();
-            RefreshConnectedControllers();
+            if (refreshConnected)
+                RefreshConnectedControllers();
 
             var overlayActive = IsGamepadOverlayActive;
 
@@ -330,7 +358,11 @@ namespace QuiverLauncher.Services
                     _gamepadStates[id] = new GamepadSample();
 
                 var currentState = _gamepadStates[id];
-                var previousState = currentState.Clone();
+                // The sample from last tick becomes "previous"; its spare set takes this tick's buttons.
+                var previousState = currentState.Previous;
+                previousState.Pressed.Clear();
+                foreach (var binding in currentState.Pressed)
+                    previousState.Pressed.Add(binding);
                 SampleController(controller, currentState);
 
                 if (_captureMode)
@@ -611,7 +643,7 @@ namespace QuiverLauncher.Services
         {
             var allControls = GetFocusableControls(_mainWindow);
 
-            if (!allControls.Any())
+            if (allControls.Count == 0)
                 return null;
 
             var currentIndex = allControls.IndexOf(current);
@@ -658,7 +690,7 @@ namespace QuiverLauncher.Services
             );
         }
 
-        private double? CalculateNavigationScore(Avalonia.Point current, Avalonia.Point candidate, NavigationDirection direction)
+        private static double? CalculateNavigationScore(Avalonia.Point current, Avalonia.Point candidate, NavigationDirection direction)
         {
             double dx = candidate.X - current.X;
             double dy = candidate.Y - current.Y;
@@ -760,7 +792,7 @@ namespace QuiverLauncher.Services
             return wrapCandidate;
         }
 
-        private Control? GetNextControlSimple(List<Control> allControls, int currentIndex, NavigationDirection direction)
+        private static Control? GetNextControlSimple(List<Control> allControls, int currentIndex, NavigationDirection direction)
         {
             switch (direction)
             {
@@ -777,7 +809,7 @@ namespace QuiverLauncher.Services
             }
         }
 
-        private List<Control> GetFocusableControls(Control parent)
+        private static List<Control> GetFocusableControls(Control parent)
         {
             var controls = new List<Control>();
 
@@ -840,6 +872,8 @@ namespace QuiverLauncher.Services
                 foreach (var id in _gameControllers.Keys.ToList())
                     CloseControllerAt(id);
 
+                // Closing right after opening: let SDL finish starting before stopping it.
+                _sdlStartup?.Wait(TimeSpan.FromSeconds(5));
                 if (SdlAvailable)
                     SDL_Quit();
                 _disposed = true;
@@ -907,13 +941,9 @@ namespace QuiverLauncher.Services
         {
             public HashSet<GamepadBinding> Pressed { get; } = new();
 
-            public GamepadSample Clone()
-            {
-                var clone = new GamepadSample();
-                foreach (var binding in Pressed)
-                    clone.Pressed.Add(binding);
-                return clone;
-            }
+            /// <summary>Reused every tick so polling allocates nothing while a pad sits idle.</summary>
+            public GamepadSample Previous => _previous ??= new GamepadSample();
+            private GamepadSample? _previous;
         }
     }
 

@@ -68,18 +68,18 @@ namespace QuiverLauncher
     public class AppSettings
     {
         public bool FirstStartup { get; set; } = true;
-        public bool IconFill { get; set; } = false;
+        public bool IconFill { get; set; }
         public bool UseGridView { get; set; } = true;
-        public bool GridCompactCards { get; set; } = false;
+        public bool GridCompactCards { get; set; }
         public float IconOpacity { get; set; } = 1.0f;
         public int IconSize { get; set; } = 124;
-        public int IconMargin { get; set; } = 0;
-        public int SlotTextMargin { get; set; } = 0;
+        public int IconMargin { get; set; }
+        public int SlotTextMargin { get; set; }
         public int SlotSize { get; set; } = 180;
         public int? ListRowHeight { get; set; }
         public int ActionButtonSize { get; set; } = 36;
-        public bool ShowOSTopBar { get; set; } = false;
-        public bool HideWindowControls { get; set; } = false;
+        public bool ShowOSTopBar { get; set; }
+        public bool HideWindowControls { get; set; }
         public int InterfaceScalePercent { get; set; } = 100;
         public bool DesktopSidebarCollapsed { get; set; }
         public string PrimaryColor { get; set; } = "#18181b";
@@ -126,7 +126,7 @@ namespace QuiverLauncher
         public bool LibraryCardTagZeroMeansHidden { get; set; } = true;
         /// <summary>User-pinned tags preferred for quick-filter chips when present in the current set.</summary>
         public List<string> PinnedFilterTags { get; set; } = new List<string>();
-        public bool StartFullscreen { get; set; } = false;
+        public bool StartFullscreen { get; set; }
         /// <summary>When true, the next launch is limited to browsing and launching. Ctrl+Alt+K unlocks that session and locks it again.</summary>
         public bool KioskMode { get; set; }
         /// <summary>Base64 salt for <see cref="KioskPinHash"/>. Empty when no PIN is set.</summary>
@@ -136,7 +136,7 @@ namespace QuiverLauncher
 
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public DesktopWindowPlacement? DesktopWindowPlacement { get; set; }
-        public bool CloseAfterLaunch {  get; set; } = false;
+        public bool CloseAfterLaunch {  get; set; }
         public bool CloseToTray { get; set; }
         public int MouseWheelScrollSpeed { get; set; } = 1;
         public bool BackgroundUpdateCheckEnabled { get; set; }

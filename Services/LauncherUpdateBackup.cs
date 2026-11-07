@@ -6,6 +6,8 @@ namespace QuiverLauncher.Services;
 /// <summary>Preserves the exact user files before staging or applying a self-update.</summary>
 public static class LauncherUpdateBackup
 {
+    private static readonly JsonSerializerOptions ManifestOptions = new() { WriteIndented = true };
+
     public const int MaxBackupCount = 10;
     public const long MaxBackupBytes = 25L * 1024 * 1024;
     public static string Create(string? dataRoot = null)
@@ -45,7 +47,7 @@ public static class LauncherUpdateBackup
             using (var manifest = new FileStream(Path.Combine(staging, "manifest.json"), FileMode.CreateNew, FileAccess.Write, FileShare.None))
             {
                 JsonSerializer.Serialize(manifest, new { createdUtc = DateTime.UtcNow, files = hashes },
-                    new JsonSerializerOptions { WriteIndented = true });
+                    ManifestOptions);
                 manifest.Flush(flushToDisk: true);
             }
             Directory.Move(staging, destination);

@@ -29,7 +29,7 @@ internal sealed class ShortcutExecutableDialog : Window
             }).ToList(),
             SelectedIndex = 0,
         };
-        var choice = candidates.FirstOrDefault();
+        var choice = candidates.Count > 0 ? candidates[0] : null;
         list.SelectionChanged += (_, _) =>
         {
             if (list.SelectedItem is ListBoxItem { Tag: string path }) choice = path;

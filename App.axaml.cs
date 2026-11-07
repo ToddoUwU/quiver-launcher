@@ -41,7 +41,7 @@ public partial class App : Application, INotifyPropertyChanged
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
 
-    private static bool _hasCheckedForAppUpdates = false;
+    private static bool _hasCheckedForAppUpdates;
     private static readonly object _updateLock = new object();
     private static readonly SemaphoreSlim _updateCheckSemaphore = new(1, 1);
     private readonly TaskCompletionSource _startupSelfUpdatePromptCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -91,6 +91,7 @@ public partial class App : Application, INotifyPropertyChanged
 
     public override void OnFrameworkInitializationCompleted()
     {
+        StartupTimeline.Mark("avalonia ready");
         // Errors nobody caught go to usage data too, when the player said yes to it.
         if (!_usageDataHandlersRegistered)
         {

@@ -118,7 +118,7 @@ public sealed class HeadlessGameDownloadDialogs : IGameDownloadDialogs
         {
             Kind = kind,
             PrefixPath = existing?.PrefixPath ?? WindowsRunnerService.GetDefaultPrefixPathForKind(kind, gamePath),
-            ProtonPath = existing?.ProtonPath ?? WindowsRunnerService.ListDetectedProtonInstallations().FirstOrDefault()?.ProtonExecutable,
+            ProtonPath = existing?.ProtonPath ?? WindowsRunnerService.FirstDetectedProtonExecutable(),
             CustomLaunchCommand = existing?.CustomLaunchCommand,
         });
     }

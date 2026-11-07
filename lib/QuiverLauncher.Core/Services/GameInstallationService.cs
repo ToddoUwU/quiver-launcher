@@ -449,7 +449,56 @@ public static class GameInstallationService
     public static bool HasCompletePortableInstallation(string path, GameInstallationOptions? options = null) =>
         Directory.Exists(path) &&
         !File.Exists(Path.Combine(path, IncompleteInstallFileName)) &&
-        FindExecutableCandidates(path, SearchOption.AllDirectories, options, out _).Count > 0;
+        HasExecutableCandidate(path, options);
+
+    /// <summary>
+    /// The same answer as asking <see cref="FindExecutableCandidates(string, SearchOption, GameInstallationOptions?, out bool)"/>
+    /// whether it found anything, but it stops at the first one. Every start asks this of every app, and listing a whole
+    /// game (tens of thousands of files, for one that builds itself) only to count past zero took most of the library's load time.
+    /// </summary>
+    internal static bool HasExecutableCandidate(string path, GameInstallationOptions? options)
+    {
+        if (CurrentDesktopPlatform != OSPlatform.Linux)
+            return FindExecutableCandidates(path, SearchOption.AllDirectories, options, out _).Count > 0;
+        if (IsCompatibilityDirectory(path))
+            return false;
+        var enumeration = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true, AttributesToSkip = 0, MatchType = MatchType.Simple };
+        var entries = new System.IO.Enumeration.FileSystemEnumerable<string>(path,
+            (ref System.IO.Enumeration.FileSystemEntry entry) => entry.ToFullPath(), enumeration)
+        {
+            ShouldRecursePredicate = (ref System.IO.Enumeration.FileSystemEntry entry) =>
+                (entry.Attributes & FileAttributes.ReparsePoint) == 0 && !IsCompatibilityDirectory(entry.ToFullPath()),
+            ShouldIncludePredicate = (ref System.IO.Enumeration.FileSystemEntry entry) => !entry.IsDirectory,
+        };
+        foreach (var file in entries)
+        {
+            if (IsLauncherMetadataFile(file, options))
+                continue;
+            if (HasNonNativeExecutableName(file) || IsNativeExecutableCandidate(file))
+                return true;
+        }
+        return false;
+    }
+
+    private static readonly string[] NamedExecutableEndings = [".x86_64", ".appimage", ".arm64", ".aarch64", ".exe", ".sh"];
+    private static readonly string[] NeverNativeEndings = [".txt", ".dll", ".so", ".json"];
+
+    private static bool HasNonNativeExecutableName(string file)
+    {
+        foreach (var ending in NamedExecutableEndings)
+            if (file.EndsWith(ending, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
+
+    private static bool IsNativeExecutableCandidate(string file)
+    {
+        var name = Path.GetFileName(file.AsSpan());
+        foreach (var ending in NeverNativeEndings)
+            if (name.EndsWith(ending, StringComparison.OrdinalIgnoreCase))
+                return false;
+        return !name.Contains(".so.", StringComparison.OrdinalIgnoreCase) && IsLikelyNativeExecutable(file, OSPlatform.Linux);
+    }
 
     public static List<string> FindExecutableCandidates(
         string path,

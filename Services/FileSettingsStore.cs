@@ -26,10 +26,12 @@ public class FileSettingsStore : ISettingsStore
         return _current;
     }
 
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
+
     public void Save(AppSettings settings)
     {
         settings.EnsureInitialized();
-        var json = JsonSerializer.Serialize(settings, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(settings, Indented);
 
         var pathLock = PathLocks.GetOrAdd(_settingsPath, _ => new object());
         lock (pathLock)

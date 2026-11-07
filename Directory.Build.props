@@ -1,0 +1,6 @@
+<Project>
+	<!-- Holds the launcher to Microsoft's performance rules (CA18xx) as warnings; .editorconfig lists the ones left off, and why. -->
+	<PropertyGroup Condition="!$(MSBuildProjectName.EndsWith('Tests'))">
+		<AnalysisModePerformance>All</AnalysisModePerformance>
+	</PropertyGroup>
+</Project>

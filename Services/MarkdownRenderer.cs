@@ -127,7 +127,7 @@ public sealed class MarkdownRenderer
                 }
 
                 // Headers
-                if (line.StartsWith("#"))
+                if (line.StartsWith('#'))
                 {
                     FlushListItems(controls, listItems, imageBaseUrl);
                     int level = 0;
@@ -569,8 +569,8 @@ public sealed class MarkdownRenderer
                     }
                     else if (tagName.Equals("img", StringComparison.OrdinalIgnoreCase))
                     {
-                        MarkdownHtml.TryParsePixels(MarkdownHtml.Attr(htmlTag, "width"), out var htmlWidth);
-                        MarkdownHtml.TryParsePixels(MarkdownHtml.Attr(htmlTag, "height"), out var htmlHeight);
+                        _ = MarkdownHtml.TryParsePixels(MarkdownHtml.Attr(htmlTag, "width"), out var htmlWidth);
+                        _ = MarkdownHtml.TryParsePixels(MarkdownHtml.Attr(htmlTag, "height"), out var htmlHeight);
                         var image = CreateMarkdownImage(
                             MarkdownHtml.Attr(htmlTag, "src") ?? string.Empty,
                             MarkdownHtml.Attr(htmlTag, "alt") ?? string.Empty,

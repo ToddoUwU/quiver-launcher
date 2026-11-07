@@ -19,6 +19,8 @@ namespace QuiverLauncher.Core.Services
 
     public static class GitHubApiCache
     {
+        private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
+
         private static readonly ConcurrentDictionary<string, GameVersionCache> _cache = new();
         private static readonly TimeSpan CacheExpiry = TimeSpan.FromHours(24);
         private static readonly TimeSpan InstalledGameUpdateInterval = TimeSpan.FromHours(6);
@@ -72,8 +74,7 @@ namespace QuiverLauncher.Core.Services
 
             try
             {
-                var options = new JsonSerializerOptions { WriteIndented = true };
-                var json = JsonSerializer.Serialize(_cache.ToDictionary(k => k.Key, v => v.Value), options);
+                var json = JsonSerializer.Serialize(_cache.ToDictionary(k => k.Key, v => v.Value), Indented);
                 File.WriteAllText(_cacheFilePath, json);
             }
             catch (Exception ex)

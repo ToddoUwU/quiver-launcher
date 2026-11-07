@@ -297,7 +297,9 @@ namespace QuiverLauncher.Services
 
             Games ??= [];
             var previousByKey = _catalogApps.Where(a => !string.IsNullOrWhiteSpace(a.InstanceKey)).GroupBy(a => a.InstanceKey, StringComparer.OrdinalIgnoreCase).ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            StartupTimeline.Mark("library: apps.json checked");
             var allApps = await _catalogService.LoadLocalCatalogAsync(_settings).ConfigureAwait(false);
+            StartupTimeline.Mark("library: apps.json read");
             _catalogApps = allApps.Where(app => app != null).Cast<GameInfo>().ToList();
 
             foreach (var app in _catalogApps)
@@ -315,7 +317,8 @@ namespace QuiverLauncher.Services
 
             if (!string.IsNullOrEmpty(_appsFolder))
             {
-                await Task.WhenAll(_catalogApps.Where(app => app != null).Select(async app =>
+                // Task.Run: each check reads the disk before its first await, so otherwise they'd run one after another.
+                await Task.WhenAll(_catalogApps.Where(app => app != null).Select(app => Task.Run(async () =>
                 {
                     try
                     {
@@ -327,9 +330,10 @@ namespace QuiverLauncher.Services
                     {
                         System.Diagnostics.Debug.WriteLine($"Error checking status for {app.Name}: {ex.Message}");
                     }
-                }));
+                })));
             }
 
+            StartupTimeline.Mark("library: every app checked");
             await RebuildVisibleGamesAsync(_settings);
 
             // The local collection is ready; artwork and online metadata must not extend startup loading UI.
@@ -339,7 +343,9 @@ namespace QuiverLauncher.Services
                 OnPropertyChanged(nameof(HasLoadedLibrary));
             });
 
+            StartupTimeline.Mark("library: visible list ready");
             await LoadCustomAndCachedIconsAsync(allowDownload: allowNetwork);
+            StartupTimeline.Mark("library: icons loaded");
         }
 
         public async Task InsertCatalogAppAsync(GameInfo app, AppSettings settings)

@@ -1,0 +1,15 @@
+# Microsoft's performance rules (CA18xx) run on every build through Directory.Build.props. The ones below were each reviewed
+# for this code base and are kept as suggestions rather than warnings, for the reasons given; docs/PERFORMANCE.md has the detail.
+[*.cs]
+# Public properties bound from XAML, and small instance APIs that tests and views use through an object.
+dotnet_diagnostic.CA1822.severity = suggestion
+# Flagged calls are safe here: .Result right after IsCompletedSuccessfully, Cancel() from synchronous handlers, a
+# FileStream.Flush(true) that exists to reach the disk (FlushAsync doesn't), and small files in command-line paths.
+dotnet_diagnostic.CA1849.severity = suggestion
+# File-picker filters and one-element arrays in code that runs at most once per dialog.
+dotnet_diagnostic.CA1861.severity = suggestion
+# Concrete types in UI code that runs a few times a second at most; the interfaces keep views and tests decoupled.
+dotnet_diagnostic.CA1859.severity = suggestion
+# JSON models whose shape is the file format, and a result struct that is never compared.
+dotnet_diagnostic.CA1819.severity = suggestion
+dotnet_diagnostic.CA1815.severity = suggestion

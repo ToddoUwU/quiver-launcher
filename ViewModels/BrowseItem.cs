@@ -28,7 +28,7 @@ public sealed class BrowseItem : ObservableViewModel, IBrowseCard
         RunsOnAndroid = os.Contains("android");
         RunsOnIOS = os.Contains("ios");
         // The website lists platforms in its icon order.
-        PlatformTip = BrowseText.PlatformNames(new[] { "windows", "macos", "linux", "android", "ios" }.Where(os.Contains));
+        PlatformTip = BrowseText.PlatformNames(BrowseText.PlatformOrder.Where(os.Contains));
     }
 
     /// <summary>The catalog app, or null for an app from the player's own list.</summary>
@@ -158,6 +158,9 @@ public sealed class BrowseItem : ObservableViewModel, IBrowseCard
 /// <summary>How Browse words catalog data, matching the website and Quiver Launcher 4.</summary>
 public static class BrowseText
 {
+    /// <summary>The website lists platforms in its icon order.</summary>
+    public static readonly string[] PlatformOrder = ["windows", "macos", "linux", "android", "ios"];
+
     public static readonly IReadOnlyList<(string? Id, string Name)> Sorts =
         [("added", "Recently added"), ("updated", "Recently updated"), ("rating", "Top rated"), ("name", "Name A–Z")];
     public static readonly IReadOnlyList<(string? Id, string Name)> Platforms =
@@ -219,7 +222,7 @@ public static class BrowseText
     /// <summary>"harbour masters" → "Harbour Masters", "n64" → "N64", like the website's tagLabel.</summary>
     public static string TagLabel(string tag)
     {
-        if (tag != tag.ToLowerInvariant()) return tag;
+        if (!tag.Equals(tag.ToLowerInvariant(), StringComparison.Ordinal)) return tag;
         return string.Join(' ', tag.Split(' ').Select((part, i) =>
             SpecialTagWords.TryGetValue(part, out var special) ? special
             : i > 0 && SmallTagWords.Contains(part) ? part

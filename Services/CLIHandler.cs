@@ -20,8 +20,6 @@ namespace QuiverLauncher
         private const ConsoleColor ColorWarning = ConsoleColor.Yellow;
         private const ConsoleColor ColorError = ConsoleColor.Red;
         private const ConsoleColor ColorMuted = ConsoleColor.DarkGray;
-        private static readonly QuiverLauncherProfile Profile = QuiverLauncherProfile.Instance;
-        private static readonly string Repository = Profile.Repository;
         private GameManager? _gameManager;
         private string _currentVersion = "Unknown";
         private readonly LauncherUpdateService _launcherUpdateService;
@@ -151,7 +149,7 @@ namespace QuiverLauncher
             }
         }
 
-        private string GetGameNameFromArgs(string[] args)
+        private static string GetGameNameFromArgs(string[] args)
         {
             if (args.Length < 2) return string.Empty;
             return string.Join(" ", args.Skip(1)).Trim('"', '\'');
@@ -742,7 +740,7 @@ namespace QuiverLauncher
 
             var installedGames = _gameManager.Games.Where(g => g.Status == GameStatus.Installed || g.Status == GameStatus.UpdateAvailable).ToList();
 
-            if (!installedGames.Any())
+            if (installedGames.Count == 0)
             {
                 WriteColor("✓ No installed games to update.", ColorSuccess);
                 Console.WriteLine();
@@ -908,7 +906,7 @@ namespace QuiverLauncher
                 (g?.FolderName != null && g.FolderName.Equals(name, StringComparison.OrdinalIgnoreCase)));
         }
 
-        private string CleanVersion(string? version)
+        private static string CleanVersion(string? version)
         {
             if (string.IsNullOrEmpty(version)) return "v0.0.0";
             if (version.Equals("Unknown", StringComparison.OrdinalIgnoreCase)) return "Unknown";
@@ -930,9 +928,9 @@ namespace QuiverLauncher
             Console.WriteLine(desc);
         }
 
-        private void PrintLine() => Console.WriteLine(new string('─', 70));
+        private static void PrintLine() => Console.WriteLine(new string('─', 70));
 
-        private void WriteColor(string text, ConsoleColor color)
+        private static void WriteColor(string text, ConsoleColor color)
         {
             var old = Console.ForegroundColor;
             try
