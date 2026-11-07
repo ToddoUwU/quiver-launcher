@@ -25,8 +25,14 @@ My inference, not their statement: a web UI can share card components with their
 | **FF9** | Rebuilt on framework 09ba00ed. 12x (was 4x), US SCPH1001 BIOS so the full real intro plays, PGXP, enhanced audio, CD-speed mods off | **Tested:** New Game, opening, first field scene, candle, naming screen, steady 60 fps. Audio measured only. Battle run was still going when I stopped |
 | **FFT** | Rebuilt on the same framework. 12x, widescreen, PGXP, enhanced audio; CD-speed mods off | **Tested:** title, opening, church, first battle, 60 fps |
 | **OoT** | No change this round | |
+| **FF8** | Rebuilt on the same framework. 12x, US SCPH1001 BIOS, PGXP, enhanced audio, Discs 2 to 4 added (checksums match), CD-speed mods off, controller on auto | **Tested:** New Game, opening movie with sound, first scene, naming screen, 60 fps. Audio measured only |
+| **Legend of Dragoon** | Updated from `devbuild` (June 2025) to release 3.0.0, by Quiver itself. Music quality settings at their highest; FPS counter off | **Tested:** opening, first scenes, 60 fps. Saves unchanged, and backed up in `~/.local/state/quiver/lod-before-release-3.0.0` |
 
 Both wrappers run the rebuild only while `version.txt` matches the version it was made from, so an official update takes over by itself. Saves stay in the game's own `saves` folder.
+
+The CD-speed mods were the problem in FF8 too. With them on, the opening movie rushed past almost silently (audio level near 0.02, against 0.03 to 0.16 with them off). Other PS1 games still have them on and may have the same problem.
+
+**Legend of Dragoon resolution:** it stays at your screen's own resolution. I tried rendering higher to smooth the edges, but in the hidden test display 4K dropped to 43 fps and 8K to 13 fps, while native holds 60.
 
 Known blemishes:
 - **FF9:** faint tile seams on pre-rendered backgrounds with bilinear filtering. I compared nearest, xBR and 6x: nearest removes them but looks blocky, xBR adds crosshatching, 6x has the same seams. Bilinear 12x looked best.
@@ -40,14 +46,16 @@ Known blemishes:
 
 Real library, read-only audit: 61 up to date, 0 behind, 6 pinned, 3 rolling, 9 not in the catalog. Star Fox [Enhanced] updated itself at 23:16.
 
+A fourth cause, for Legend of Dragoon: `release-3.1.0` never counted as newer than `release-3.0.0`, and a game on a tag with no numbers (`devbuild`) could never move at all. Tags with the same word now compare by their numbers, and a tag with no numbers moves once the catalog has verified a numbered release. **Tested for real:** Quiver updated the game by itself 6 seconds after starting and put back its 3 settings files.
+
 ## 5. Automated testing
-- **Suite:** 1,828 passed, 0 failed, 8 skipped. It previously had 15 failures and a hang, all from assuming no Wine and no real controllers, plus build servers holding a pipe open.
+- **Suite:** 1,841 passed, 0 failed, 8 skipped, including while games ran alongside it. It previously had 15 failures and a hang, all from assuming no Wine and no real controllers, plus build servers holding a pipe open.
 - **New end-to-end update tests:** first start, Proton, running games.
 - **GitHub CI:** `.github/workflows/personal-ci.yml` runs every test on each push to PersonalUpdates.
 - **`quiver build`:** a new build only goes live if every test passes.
 - **`quiver test`, `quiver audit`:** on demand. `tools/gamesmoke/smoke.py` runs a game hidden with a virtual pad, screenshots and audio levels.
 
-**Not on: the nightly run.** The system blocked me from installing a scheduled job without your approval. To turn it on: `~/QuiverLauncher/quiver-launcher/tools/install-automation`
+**Nightly run:** on since you enabled it (05:00, launcher tests plus the library audit). To stop it: `~/QuiverLauncher/quiver-launcher/tools/install-automation --off`
 
 ## 6. Launcher speed
 Medians on your 79-game library, in a hidden display.
@@ -93,13 +101,12 @@ Also fixes the icon margin setting, whose binding always failed. **No features w
 - **Not tested through a real Moonlight stream or on your real monitors:** the new launcher build or the rebuilt games.
 - **Audio by ear:** FF9 and FFT were measured only. FF9 peaks reached 1.0 in the opening movie, so listen for clipping.
 - **Battle Arena Toshinden:** still launches v0.1.3.
-- **Legend of Dragoon:** the audit should now report it as behind (devbuild vs release-3.0.0); it needs Change Version by hand.
-- **FF8 and other PS1 games:** CD-speed problem unchecked.
+- **Other PS1 games:** still have the CD-speed mods on. I haven't changed or tested them.
 - **AeroGauge:** run.log shows `aerogauge_modern` needs GLIBC_2.43, which this system lacks. My test pad pressed Play by accident during testing, which may have updated its last-played time.
 - **Disc changes** in FF9: untested.
 
 ## 9. Going back
 - Launcher build: `~/.local/state/quiver/build-before-optimization`
-- Scripts: `~/.local/state/quiver/{quiver,quiver-tv,quiver-settings}.before-optimization`
-- Games: `play-wayland.bak-2026-11-07` in each game's folder
+- Scripts: `~/.local/state/quiver/{quiver,quiver-tv,quiver-settings}.before-optimization`. The live ones are now in `tools/launch`, linked from `~/.local/bin`
+- Games: `play-wayland.bak-2026-11-07` in each game's folder; Legend of Dragoon's old saves and settings in `~/.local/state/quiver/lod-before-release-3.0.0`
 - Source: `git revert` on PersonalUpdates

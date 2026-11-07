@@ -25,9 +25,9 @@ path = "$HOME/.local/share/QuiverLauncher/Apps/FinalFantasyVIII-FinalFantasyVIII
 selected = 1
 
 [memcard]
-dir = "$HOME/QuiverLauncher/src/ff-newfw/ff8-testsaves"
-card1 = "$HOME/QuiverLauncher/src/ff-newfw/ff8-testsaves/card1.mcd"
-card2 = "$HOME/QuiverLauncher/src/ff-newfw/ff8-testsaves/card2.mcd"
+dir = "$HOME/.local/share/QuiverLauncher/Apps/FinalFantasyVIII-FinalFantasyVIIIRecompiled/saves"
+card1 = "$HOME/.local/share/QuiverLauncher/Apps/FinalFantasyVIII-FinalFantasyVIIIRecompiled/saves/card1.mcd"
+card2 = "$HOME/.local/share/QuiverLauncher/Apps/FinalFantasyVIII-FinalFantasyVIIIRecompiled/saves/card2.mcd"
 enable1 = true
 enable2 = true
 
