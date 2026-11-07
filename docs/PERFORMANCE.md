@@ -25,7 +25,7 @@ My inference, not their statement: a web UI can share card components with their
 | **FF9** | Rebuilt on framework 09ba00ed. 12x (was 4x), US SCPH1001 BIOS so the full real intro plays, PGXP, enhanced audio, CD-speed mods off | **Tested:** New Game, opening, first field scene, candle, naming screen, steady 60 fps. Audio measured only. Battle run was still going when I stopped |
 | **FFT** | Rebuilt on the same framework. 12x, widescreen, PGXP, enhanced audio; CD-speed mods off | **Tested:** title, opening, church, first battle, 60 fps |
 | **OoT** | No change this round | |
-| **FF8** | Rebuilt on the same framework. 12x, US SCPH1001 BIOS, PGXP, enhanced audio, Discs 2 to 4 added (checksums match), CD-speed mods off, controller on auto | **Tested:** New Game, opening movie with sound, first scene, naming screen, 60 fps. Audio measured only |
+| **FF8** | Rebuilt on the same framework. 12x, US SCPH1001 BIOS, PGXP, enhanced audio, Discs 2 to 4 added (checksums match), CD-speed mods off, controller on auto | **Tested:** New Game, opening movie with sound, infirmary scene, naming screen, Balamb Garden hallway, steady 60 fps for 9 minutes. Battles not reached. Audio measured only |
 | **Legend of Dragoon** | Updated from `devbuild` (June 2025) to release 3.0.0, by Quiver itself. Music quality settings at their highest; FPS counter off | **Tested:** opening, first scenes, 60 fps. Saves unchanged, and backed up in `~/.local/state/quiver/lod-before-release-3.0.0` |
 
 Both wrappers run the rebuild only while `version.txt` matches the version it was made from, so an official update takes over by itself. Saves stay in the game's own `saves` folder.
