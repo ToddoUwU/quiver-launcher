@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Sunshine "Quiver Launcher" tile. Wayland can't raise a window that's already open, so a running Quiver closes and a
+# fresh one starts on the screen being streamed.
+#
+# Controllers: this PC's own pad, left connected at the desk, would otherwise take player 1 from the pad Moonlight
+# passes through. For anything started from here, only Moonlight's pad counts. Set QUIVER_TV_KEEP_LOCAL_PADS=1 to keep them.
+[[ -n ${QUIVER_TV_KEEP_LOCAL_PADS:-} ]] || export SDL_GAMECONTROLLER_IGNORE_DEVICES=${QUIVER_TV_IGNORE_PADS:-0x045e/0x0b12}
+
+running() {
+  local pid
+  for pid in $(pgrep -x -u "$USER" "QuiverLauncher."); do
+    [[ $(readlink "/proc/$pid/exe") == */QuiverLauncher.Desktop ]] && { echo "$pid"; return 0; }
+  done
+  return 1
+}
+
+APPS=${XDG_DATA_HOME:-$HOME/.local/share}/QuiverLauncher/Apps
+if PID=$(running); then
+  # Closing Quiver in the middle of unpacking a game update would leave that game half installed: give it time to finish.
+  for _ in {1..600}; do
+    compgen -G "$APPS/*/install-incomplete.txt" >/dev/null || break
+    sleep 0.2
+  done
+  kill "$PID" 2>/dev/null
+  # As soon as it's gone, not a fixed two seconds.
+  for _ in {1..50}; do kill -0 "$PID" 2>/dev/null || break; sleep 0.1; done
+  kill -9 "$PID" 2>/dev/null
+fi
+exec "$HOME/.local/bin/quiver"

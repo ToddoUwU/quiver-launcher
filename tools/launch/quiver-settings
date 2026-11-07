@@ -1,0 +1,207 @@
+#!/usr/bin/env bash
+# Snapshot and restore the per-game settings files in Quiver's Apps folder, so a game update that ships
+# its own default config can't silently replace yours.
+#
+#   quiver-settings backup [label]     snapshot every game's settings files (prints the snapshot path)
+#   quiver-settings list               list snapshots, newest last
+#   quiver-settings changed [snap]     settings files that differ from a snapshot (default: newest)
+#   quiver-settings updated <snap>     like `changed`, but only for games whose version.txt changed since <snap>
+#   quiver-settings restore [snap] [game-folder|game-folder/file …]
+#                                      put back changed files from a snapshot (default: newest, all games).
+#                                      The current versions are snapshotted first, so a restore can be undone.
+#   quiver-settings restore-external [snap] [path-substring]
+#                                      same for ports that keep settings outside Apps/ (SoH, BattleShip,
+#                                      sm64coopdx, DKR-R, Castlevania LoD, SMS Launcher, …; see EXTERNAL)
+#   quiver-settings watch <pid>        while <pid> runs, keep a live mirror of each game's settings and put back
+#                                      any file a Quiver update replaces (log: settings-live/restores.log)
+#   quiver-settings watch-once         one mirror/restore pass
+#
+# Settings = *.ini *.cfg *.toml *.json *.yaml *.yml *.conf, plus portable.txt / selected_executable.txt,
+# up to 3 folders deep in each game, under 1 MB. Run reports, overlay captures, symbol tables and
+# bundled assets are skipped. Snapshots go to ~/.local/state/quiver/settings-backups (last 40 kept;
+# unchanged files are hard-linked to the previous snapshot, so each one costs almost nothing).
+set -uo pipefail
+
+APPS=${QUIVER_APPS_DIR:-${XDG_DATA_HOME:-$HOME/.local/share}/QuiverLauncher/Apps}
+LIB=$(dirname "$APPS")
+STORE=${XDG_STATE_HOME:-$HOME/.local/state}/quiver/settings-backups
+KEEP=40
+
+die() { echo "quiver-settings: $*" >&2; exit 1; }
+[[ -d $APPS ]] || die "no Apps folder at $APPS"
+mkdir -p "$STORE"
+
+# NUL-separated paths of settings files, relative to $APPS (game-folder/…).
+settings_files() {
+  (cd "$APPS" && find . -mindepth 2 -maxdepth 4 \
+      \( -type d \( -name assets -o -name Cache -o -name cache -o -name logs -o -name shaders \
+                    -o -name '*.json.d' -o -name .git -o -name saves \) -prune \) -o \
+      -type f -size -1024k \
+      \( -iname '*.ini' -o -iname '*.cfg' -o -iname '*.toml' -o -iname '*.json' -o -iname '*.yaml' \
+         -o -iname '*.yml' -o -iname '*.conf' -o -name portable.txt -o -name selected_executable.txt \) \
+      ! -iname '*.deps.json' ! -iname '*.runtimeconfig.json' ! -iname '*report*.json' \
+      ! -iname 'overlay_captures.json' ! -iname '*.syms.toml' \
+      -printf '%P\0')
+}
+
+# NUL-separated settings files (paths relative to $HOME) of ports that store them outside Apps/.
+EXTERNAL=(.local/share/soh .local/share/BattleShip .local/share/sm64coopdx .config/dkr-port .lodrecomp
+          .config/sms-launcher .local/share/melee-pc .config/Zelda64Recompiled .config/RoadRash64Recompiled
+          .config/lost-odyssey-recomp)
+external_files() {
+  local d; for d in "${EXTERNAL[@]}"; do
+    [[ -d $HOME/$d ]] || continue
+    (cd "$HOME" && find "$d" -maxdepth 2 -type f -size -1024k \
+        \( -iname '*.ini' -o -iname '*.cfg' -o -iname '*.toml' -o -iname '*.json' -o -iname '*.conf' \
+           -o -iname '*config*.txt' -o -name last-rom.txt \) ! -iname '*.bak*' -printf '%p\0')
+  done
+}
+
+restore_external() {
+  local snap; snap=$(resolve "${1:-}"); shift || true
+  [[ -d $snap/external ]] || { echo "$(basename "$snap") has no external settings."; return 0; }
+  local undo; undo=$(backup before-restore) f
+  (cd "$snap/external" && find . -type f -printf '%P\n') | grep -F "${1:-}" | while read -r f; do
+    cmp -s "$snap/external/$f" "$HOME/$f" && continue
+    mkdir -p "$HOME/$(dirname "$f")"
+    cp -p --remove-destination -- "$snap/external/$f" "$HOME/$f" && echo "restored ~/$f"
+  done
+  echo "(previous versions saved in $(basename "$undo"))"
+}
+
+latest() { ls -1d "$STORE"/*/ 2>/dev/null | tail -1 | sed 's:/$::'; }
+
+resolve() { # $1 = snapshot name/path or empty → absolute path
+  local s=${1:-}
+  [[ -z $s ]] && { s=$(latest); [[ -n $s ]] || die "no snapshots yet (run: quiver-settings backup)"; }
+  [[ -d $s ]] || s=$STORE/$s
+  [[ -d $s/files ]] || die "no snapshot $1"
+  echo "$s"
+}
+
+backup() {
+  local label=${1:-manual} prev; prev=$(latest)
+  local snap; snap=$STORE/$(date +%Y-%m-%d_%H%M%S)-$label
+  mkdir -p "$snap/files"
+  local link=(); [[ -n $prev && -d $prev/files ]] && link=(--link-dest="$prev/files")
+  settings_files | rsync -a --from0 --files-from=- "${link[@]}" "$APPS/" "$snap/files/" \
+    || die "rsync failed"
+  # Game versions at snapshot time, so `updated` knows which games Quiver updated afterwards.
+  for d in "$APPS"/*/; do
+    [[ -f $d/version.txt ]] && printf '%s\t%s\n' "$(basename "$d")" "$(tr -d '\r\n' <"$d/version.txt")"
+  done >"$snap/versions.tsv"
+  cp -a "$LIB/apps.json" "$LIB/settings.json" "$snap/" 2>/dev/null
+  # Ports that keep their settings outside Apps/ (a game update never touches these, but a port's own
+  # updater or a reset could). Copied to $snap/external/<path under $HOME>; put back with restore-external.
+  external_files | rsync -a --from0 --files-from=- "$HOME/" "$snap/external/" 2>/dev/null
+  # Prune old snapshots.
+  ls -1d "$STORE"/*/ | head -n -"$KEEP" | while read -r old; do rm -rf -- "$old"; done
+  echo "$snap"
+}
+
+# Prints game-folder/file for each file in the snapshot whose current copy differs or is gone.
+changed() {
+  local snap; snap=$(resolve "${1:-}")
+  (cd "$snap/files" && find . -type f -printf '%P\n') | sort | while read -r f; do
+    cmp -s "$snap/files/$f" "$APPS/$f" || echo "$f"
+  done
+}
+
+updated_games() { # games whose version.txt now differs from the snapshot's
+  local snap=$1 game ver now
+  while IFS=$'\t' read -r game ver; do
+    now=$(tr -d '\r\n' <"$APPS/$game/version.txt" 2>/dev/null)
+    [[ -n $now && $now != "$ver" ]] && echo "$game"
+  done <"$snap/versions.tsv"
+}
+
+updated() {
+  local snap; snap=$(resolve "${1:-}")
+  local games; games=$(updated_games "$snap")
+  [[ -n $games ]] || return 0
+  changed "$snap" | grep -F -f <(sed 's:$:/:' <<<"$games") || true
+}
+
+restore() {
+  local snap; snap=$(resolve "${1:-}"); shift || true
+  local picks=() f
+  if (($#)); then
+    for f in "$@"; do
+      if [[ -f $snap/files/$f ]]; then picks+=("$f")
+      else mapfile -t -O "${#picks[@]}" picks < <(changed "$snap" | grep -F "${f%/}/"); fi
+    done
+  else
+    mapfile -t picks < <(changed "$snap")
+  fi
+  ((${#picks[@]})) || { echo "Nothing to restore: settings already match $(basename "$snap")."; return 0; }
+  local undo; undo=$(backup before-restore)
+  for f in "${picks[@]}"; do
+    mkdir -p "$APPS/$(dirname "$f")"
+    cp -p --remove-destination -- "$snap/files/$f" "$APPS/$f" && echo "restored $f"
+  done
+  echo "(previous versions saved in $(basename "$undo"))"
+}
+
+# Live mirror of each game's settings while its version.txt stays the same. When Quiver updates a game (version.txt
+# changes), every settings file that now differs from the last pre-update mirror was replaced by the update, so it is
+# put back. Settings changed in-game before the update were already mirrored, so they are kept. (2026-10-17)
+LIVE=${XDG_STATE_HOME:-$HOME/.local/state}/quiver/settings-live
+watch_pass() {
+  local d game ver last f n restored=()
+  mkdir -p "$LIVE"
+  for d in "$APPS"/*/; do
+    # Plain bash from here to the find: this runs every few seconds, even during a game, so it starts no programs.
+    [[ -f $d/version.txt ]] || continue
+    game=${d%/}; game=${game##*/}
+    ver=; read -r ver <"$d/version.txt"; ver=${ver%$'\r'}
+    last=; [[ -f $LIVE/$game.version ]] && read -r last <"$LIVE/$game.version"
+    [[ $ver == "$last" ]] && continue
+    if [[ -n $last && -d $LIVE/$game ]]; then
+      n=0
+      while IFS= read -r -d '' f; do
+        cmp -s "$LIVE/$game/$f" "$d/$f" && continue
+        mkdir -p "$(dirname "$d/$f")"
+        cp -p --remove-destination -- "$LIVE/$game/$f" "$d/$f" && { restored+=("$game/$f"); n=$((n + 1)); }
+      done < <(cd "$LIVE/$game" && find . -type f -printf '%P\0')
+      echo "$(date '+%F %T') $game $last -> $ver: restored $n settings file(s)" >>"$LIVE/restores.log"
+    fi
+    printf '%s\n' "$ver" >"$LIVE/$game.version"
+  done
+  ((${#restored[@]})) && printf '%s\n' "${restored[@]}"
+  return 0
+}
+
+# Copies the current settings to the mirror (one scan and one rsync). Never while an update is unpacking: its files would
+# overwrite the player's in the mirror, and then the shipped settings are what comes back.
+mirror_settings() {
+  compgen -G "$APPS/*/install-incomplete.txt" >/dev/null && return 1
+  settings_files | rsync -a --from0 --files-from=- "$APPS/" "$LIVE/" 2>/dev/null
+  return 0
+}
+
+# watch <pid>: check for updates every 5 s and refresh the mirror once a minute, until <pid> exits, then one final pass.
+watch() {
+  local pid=$1 out next_mirror=0
+  while kill -0 "$pid" 2>/dev/null; do
+    out=$(watch_pass)
+    [[ -n $out ]] && command -v notify-send >/dev/null \
+      && notify-send -a "Quiver Launcher" "Game updated, settings kept" "$(wc -l <<<"$out") settings file(s) restored after the update"
+    if ((SECONDS >= next_mirror)) && mirror_settings; then next_mirror=$((SECONDS + 60)); fi
+    sleep 5
+  done
+  watch_pass
+  mirror_settings
+}
+
+cmd=${1:-help}; shift || true
+case $cmd in
+  backup)  backup "$@" ;;
+  list)    ls -1 "$STORE" ;;
+  changed) changed "$@" ;;
+  updated) updated "$@" ;;
+  restore) restore "$@" ;;
+  restore-external) restore_external "$@" ;;
+  watch)   watch "$@" ;;
+  watch-once) watch_pass; mirror_settings ;;
+  *)       sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//' ;;
+esac

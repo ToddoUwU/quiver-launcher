@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# Quiver Launcher, always from source (~/QuiverLauncher/quiver-launcher).
+#
+#   quiver               start Quiver right away (a new build, if the source changed, gets ready in the background for
+#                        next time); snapshot game settings; while it runs, put back any settings a game update replaces
+#   quiver build         publish a fast-starting build and run every test; it only becomes the one in use if they pass
+#   quiver sync          take new commits from upstream's v3 branch by hand, then build (never automatic)
+#   quiver test          run every test now     quiver audit   check the real library (read-only)
+#
+# Fork layout: upstream = tgeorgiadis/quiver-launcher (push disabled), origin = ToddoUwU/quiver-launcher.
+# Stays on C#: upstream's main became the Tauri rewrite (Quiver 4) on 2026-10-31, and the C# app lives on its v3 branch.
+# Launching no longer fetches or merges anything, so the source only changes when you change it. `quiver sync`:
+#   1. fork's v3 <- upstream/v3 (an exact mirror; never commit to it)
+#   2. PersonalUpdates <- origin/v3, then pushed back to the fork. Upstream's main is never merged.
+# Nothing here waits for a click: this also starts from Moonlight, where a dialog can't be answered.
+# Logs: ~/.local/state/quiver/{git,build,run}.log
+set -uo pipefail
+
+REPO=${QUIVER_REPO:-$HOME/QuiverLauncher/quiver-launcher}
+PROJ=QuiverLauncher.Desktop/QuiverLauncher.Desktop.csproj
+STATE=${XDG_STATE_HOME:-$HOME/.local/state}/quiver
+BUILDS=$STATE/builds
+CURRENT=$BUILDS/current # a link to the newest build that passed its tests
+BIN=$CURRENT/QuiverLauncher.Desktop
+mkdir -p "$BUILDS"
+export QuiverLauncher_SKIP_UPDATES=1 # updates come from git, not Quiver's self-updater
+export DOTNET_CLI_TELEMETRY_OPTOUT=1 DOTNET_NOLOGO=1
+# Proton flags for Windows-only games (no PROTON_ENABLE_WAYLAND: games run through XWayland like Quiver)
+export PROTON_DXVK_LOWLATENCY=1 # low-latency DXVK; Proton picks XWayland/audio itself (no forced Wayland)
+
+if [[ -t 1 ]]; then GUI=0; else GUI=1; fi
+command -v zenity >/dev/null || GUI=0
+GUI=${QUIVER_GUI:-$GUI} # QUIVER_GUI=0 forces plain output
+
+say()  { echo "quiver: $*" >&2; }
+# Never blocks: the dialog closes by itself and Quiver starts behind it.
+warn() { say "$*"; if ((GUI)); then zenity --warning --timeout=20 --title="Quiver Launcher" --text="$*" >/dev/null 2>&1 & disown; fi; return 0; }
+die()  { say "$*"; ((GUI)) && zenity --error --timeout=30 --title="Quiver Launcher" --text="$*" 2>/dev/null; exit 1; }
+
+sync_fork() {
+  local log=$STATE/git.log g=(git -C "$REPO")
+  echo "== $(date) :: sync" >>"$log"
+  timeout 60 "${g[@]}" fetch --quiet upstream v3 2>>"$log" || die "Couldn't reach upstream (see $log)."
+  timeout 60 "${g[@]}" fetch --quiet upstream refs/heads/v3:refs/remotes/upstream/v3 2>>"$log"
+  timeout 60 "${g[@]}" push --quiet origin upstream/v3:refs/heads/v3 >>"$log" 2>&1 || say "couldn't push v3 to your fork (see $log)"
+  timeout 60 "${g[@]}" fetch --quiet origin 2>>"$log" || true
+  [[ $("${g[@]}" branch --show-current) == PersonalUpdates ]] || { say "not on PersonalUpdates; nothing merged"; return 0; }
+  "${g[@]}" rev-parse -q --verify origin/v3 >/dev/null || { say "your fork has no v3 branch; nothing merged"; return 0; }
+  if [[ -n $("${g[@]}" status --porcelain --untracked-files=no) ]]; then
+    say "you have uncommitted edits: commit them to PersonalUpdates first; nothing merged"; return 0
+  fi
+  if ! "${g[@]}" merge --no-edit --quiet origin/v3 >>"$log" 2>&1; then
+    "${g[@]}" merge --abort >>"$log" 2>&1
+    say "origin/v3 conflicts with your PersonalUpdates commits, so it wasn't merged. Resolve with: cd $REPO && git merge origin/v3"
+    return 0
+  fi
+  timeout 60 "${g[@]}" push --quiet origin PersonalUpdates >>"$log" 2>&1 || say "couldn't push PersonalUpdates to your fork (see $log)"
+}
+
+source_stamp() { { git -C "$REPO" rev-parse HEAD; git -C "$REPO" diff HEAD; } 2>/dev/null | sha256sum | cut -d' ' -f1; }
+
+# Publishes into a folder of its own, tests, then switches. A build that fails either step never replaces the working one.
+build() {
+  local log=$STATE/build.log stamp=${1:?} out=${BUILDS:?}/${1:?}
+  local cmd=(dotnet publish "$PROJ" -c Release -r linux-x64 -p:QuiverFastStart=true -nologo -o "$out")
+  echo "== $(date) :: ${cmd[*]}" >"$log"
+  (cd "$REPO" && "${cmd[@]}") >>"$log" 2>&1 || { rm -rf "${out:?}"; return 1; }
+  [[ -x $out/QuiverLauncher.Desktop ]] || { rm -rf "${out:?}"; return 1; }
+  if ! "$REPO/tools/quiver-test" >>"$log" 2>&1; then
+    rm -rf "${out:?}"
+    return 2
+  fi
+  ln -sfn "$out" "$CURRENT.new" && mv -Tf "$CURRENT.new" "$CURRENT"
+  echo "$stamp" >"$STATE/build.stamp"
+  # Keep the build in use and the one before it, to go back to by hand.
+  local old; while IFS= read -r old; do rm -rf "${BUILDS:?}/${old:?}"; done \
+    < <(ls -1t "$BUILDS" | grep -vxF -e current -e "$stamp" | tail -n +2)
+}
+
+build_or_warn() {
+  [[ -d $REPO/.git ]] || die "$REPO is not a git checkout."
+  local stamp; stamp=$(source_stamp)
+  [[ -x $BIN && $stamp == $(cat "$STATE/build.stamp" 2>/dev/null) ]] && return 0
+  say "building (this also runs every test)"
+  build "$stamp"
+  case $? in
+    0) say "new build ready" ;;
+    2) warn "The new Quiver build failed its tests, so the previous build stays in use.\nSee $STATE/tests/latest.log" ;;
+    *) warn "The Quiver build failed, so the previous build stays in use.\nSee $STATE/build.log" ;;
+  esac
+}
+
+# The source changed: start what works now and get the new build ready for next time. Nobody waits minutes at a TV.
+build_in_background_if_changed() {
+  [[ $(source_stamp) == $(cat "$STATE/build.stamp" 2>/dev/null) ]] && return 0
+  [[ -e $STATE/build.running ]] && return 0
+  say "the source changed: building for next time in the background"
+  ( trap 'rm -f "$STATE/build.running"' EXIT; : >"$STATE/build.running"; GUI=0; nice -n 10 "$0" build >/dev/null 2>&1 ) &
+  disown
+}
+
+# The real launcher, not its test program (they share a process name).
+quiver_pid() {
+  local pid
+  for pid in $(pgrep -x -u "$USER" "QuiverLauncher."); do
+    [[ $(readlink "/proc/$pid/exe") == */QuiverLauncher.Desktop ]] && { echo "$pid"; return 0; }
+  done
+  return 1
+}
+
+case ${1:-} in
+  build) build_or_warn; exit ;;
+  sync) [[ -d $REPO/.git ]] || die "$REPO is not a git checkout."; sync_fork; build_or_warn; exit ;;
+  test) exec "$REPO/tools/quiver-test" ;;
+  audit) exec "$REPO/tools/quiver-audit" ;;
+  --no-update) shift ;; # the default now; still accepted
+esac
+
+# Already open: don't start a second copy.
+quiver_pid >/dev/null && { say "Quiver is already running"; exit 0; }
+
+if [[ -x $BIN ]]; then build_in_background_if_changed; else build_or_warn; fi
+[[ -x $BIN ]] || die "There is no working Quiver build. See $STATE/build.log"
+# Done alongside the start rather than before it: it's a quarter of a second, and updates begin later than that.
+quiver-settings backup session >/dev/null 2>>"$STATE/run.log" &
+# One long run of a chatty game shouldn't leave a huge log forever.
+if [[ -f $STATE/run.log ]] && (($(stat -c %s "$STATE/run.log") > 20000000)); then mv -f "$STATE/run.log" "$STATE/run.log.1"; fi
+cd "${XDG_DATA_HOME:-$HOME/.local/share}/QuiverLauncher" || cd "$HOME"
+echo "== $(date) :: $BIN $*" >>"$STATE/run.log"
+"$BIN" "$@" >>"$STATE/run.log" 2>&1 &
+QPID=$!
+# Auto-updates (per-app autoUpdate, verified releases only) are applied by Quiver while it runs; the watcher puts back
+# any settings file an update replaces, within ~5 s and before the game is played (log: settings-live/restores.log).
+quiver-settings watch "$QPID" >>"$STATE/run.log" 2>&1 &
+wait "$QPID"
+wait
+exit 0
