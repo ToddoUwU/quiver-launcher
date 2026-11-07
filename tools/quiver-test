@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Runs every launcher test in a throwaway home, so nothing can touch the real library, and keeps the result.
+#   quiver-test            run the tests (exit 0 = all passed)
+#   quiver-test --notify   also show a desktop notification when something fails (for a nightly run)
+# Results: ~/.local/state/quiver/tests/latest.{log,trx,json}
+set -uo pipefail
+REPO=${QUIVER_REPO:-$HOME/QuiverLauncher/quiver-launcher}
+OUT=${XDG_STATE_HOME:-$HOME/.local/state}/quiver/tests
+NOTIFY=0; [[ ${1:-} == --notify ]] && NOTIFY=1
+mkdir -p "$OUT"
+cd "$REPO" || exit 2
+start=$(date +%s)
+(
+  # shellcheck source=/dev/null
+  . "$REPO/tools/isolated-env.sh"
+  trap 'rm -rf "$ISO_HOME"' EXIT
+  # The memory cap protects the desktop session from a runaway build (it has killed the session once).
+  exec_prefix=(); command -v systemd-run >/dev/null && exec_prefix=(systemd-run --user --scope --collect -q -p MemoryMax=8G)
+  "${exec_prefix[@]}" dotnet test QuiverLauncher.Tests/QuiverLauncher.Tests.csproj -c Release \
+    -nodeReuse:false -p:UseSharedCompilation=false \
+    --logger "trx;LogFileName=latest.trx" --logger "console;verbosity=minimal" \
+    --results-directory "$OUT" --blame-hang-timeout 12m
+) >"$OUT/latest.log" 2>&1
+rc=$?
+line=$(grep -E '^(Passed|Failed)!' "$OUT/latest.log" | tail -1)
+commit=$(git -C "$REPO" rev-parse --short HEAD)
+printf '{"when":"%s","commit":"%s","exit":%d,"seconds":%d,"summary":"%s"}\n' \
+  "$(date -Is)" "$commit" "$rc" "$(( $(date +%s) - start ))" "${line//\"/}" >"$OUT/latest.json"
+cat "$OUT/latest.json"
+if ((rc != 0 && NOTIFY)); then
+  gdbus call --session --dest org.freedesktop.Notifications --object-path /org/freedesktop/Notifications \
+    --method org.freedesktop.Notifications.Notify "Quiver Launcher" 0 quiver-launcher "Quiver tests failed" \
+    "${line:-The test run did not finish.} See $OUT/latest.log" '[]' '{}' 20000 >/dev/null 2>&1
+fi
+exit "$rc"

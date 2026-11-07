@@ -3,7 +3,9 @@ using System.IO.Compression;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text.Json;
+using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
 using FluentAssertions;
 using QuiverLauncher.Core.Models;
 using QuiverLauncher.Models;
@@ -609,6 +611,47 @@ public class ReleaseVerificationTests
         launcher.Network.Downloads.Should().Be(0);
         app.Status.Should().Be(GameStatus.UpdateAvailable, "the player updates it themselves, after the warning");
         AssertStillV1(app, launcher.Manager.GamesFolder);
+    }
+
+    [AvaloniaFact]
+    public async Task Starting_the_launcher_installs_waiting_updates_without_waiting_for_the_hourly_check()
+    {
+        using var launcher = new Launcher();
+        var repo = Repo();
+        var served = Zip("v2.txt");
+        launcher.Network.Site["/release-status?limit=100"] = Page([Status("alpha", repo, "v2")]);
+        launcher.Network.Site["/apps/alpha/release-history?limit=100"] = Page([History("v2", "verified", [], [(Asset, served)])]);
+        launcher.Network.Files[SiteLink("v2", Asset)] = served;
+        launcher.Network.Files[OnGitHub("v2").assets[0].browser_download_url] = served;
+        launcher.Network.GitHub[$"/repos/{repo}/releases/latest"] = Json(OnGitHub("v2"));
+        launcher.Network.GitHub[$"/repos/{repo}/releases"] = Json(new[] { OnGitHub("v2") });
+        var app = App("Alpha", repo, manager: launcher.Manager);
+        InstallOnDisk(app, launcher.Manager.GamesFolder, "v1");
+        await File.WriteAllTextAsync(launcher.Manager.CatalogService.AppsConfigPath, Json(new
+        {
+            apps = new[] { new { name = "Alpha", repository = repo, folderName = app.FolderName, autoUpdate = true } },
+        }));
+        launcher.Manager.UiThreadInvoker = action => Dispatcher.UIThread.InvokeAsync(action).GetTask();
+        var view = new MainView(new() { SettingsStore = launcher.Store, GameManager = launcher.Manager, InitializeOnOpen = false, EnableInput = false, EnableMusic = false });
+        var window = new Window { Content = view, Width = 1280, Height = 860 };
+        var versionFile = Path.Combine(app.GetInstallPath(launcher.Manager.GamesFolder), "version.txt");
+        try
+        {
+            window.Show();
+            await view.InitializeGamesAsync();
+            for (var i = 0; i < 600 && File.ReadAllText(versionFile).Trim() != "v2"; i++)
+            {
+                await Task.Delay(25, TestContext.Current.CancellationToken);
+                Dispatcher.UIThread.RunJobs();
+            }
+            File.ReadAllText(versionFile).Trim().Should().Be("v2", "a session can be shorter than the first background check");
+            launcher.Network.Requests.Count(u => u.AbsolutePath.EndsWith(Asset)).Should().Be(1);
+        }
+        finally
+        {
+            window.Close();
+            await view.ShutdownAsync();
+        }
     }
 
     [AvaloniaFact]

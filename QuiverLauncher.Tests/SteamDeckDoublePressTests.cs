@@ -219,6 +219,10 @@ public class SteamDeckDoublePressTests : IDisposable
             _controller = new LauncherInputController(view, () => settings.Current, _bindings, () => true, () => false, () => { },
                 new(_ => true, Confirm, () => Cancels++, () => { }, _ => { }, () => { }), enableInput: true);
 
+            // A real pad on the machine running the tests counts too: only this one is new.
+            Poll();
+            var padsBefore = _controller.Service!.ConnectedGamepadCount;
+
             SDL_VirtualJoystickDesc desc;
             SDL_INIT_INTERFACE(out desc);
             desc.type = (ushort)SDL_JoystickType.SDL_JOYSTICK_TYPE_GAMEPAD;
@@ -228,7 +232,7 @@ public class SteamDeckDoublePressTests : IDisposable
             _pad = SDL_OpenJoystick(_padId);
             ((nint)_pad).Should().NotBe(0, SDL_GetError());
             Poll();
-            _controller.Service!.ConnectedGamepadCount.Should().Be(1);
+            _controller.Service!.ConnectedGamepadCount.Should().Be(padsBefore + 1);
         }
 
         private void Confirm()

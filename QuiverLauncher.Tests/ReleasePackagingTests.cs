@@ -69,7 +69,7 @@ public class ReleasePackagingTests
                 : "linux-x64";
 
             var publishArgs =
-                $"publish \"{Path.Combine(RepoRoot, "QuiverLauncher.Desktop", "QuiverLauncher.Desktop.csproj")}\" -c Release -r {runtimeIdentifier} --self-contained true -p:PublishTrimmed=false -o \"{publishDir}\"";
+                $"publish \"{Path.Combine(RepoRoot, "QuiverLauncher.Desktop", "QuiverLauncher.Desktop.csproj")}\" -c Release -r {runtimeIdentifier} --self-contained true -p:PublishTrimmed=false -nodeReuse:false -p:UseSharedCompilation=false -o \"{publishDir}\"";
 
             using var timeoutCts = new CancellationTokenSource(PublishTimeout);
 

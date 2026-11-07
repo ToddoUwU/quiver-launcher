@@ -216,7 +216,7 @@ public sealed class IncompleteInstallationTests : IDisposable
     {
         public string? Error;
         public Task<bool> ConfirmDownloadWithoutRunnerAsync() => Task.FromResult(true);
-        public Task<LinuxWindowsRunnerConfig?> ConfigureWindowsRunnerAsync(string gamePath, LinuxWindowsRunnerConfig? existing = null, bool isInstall = true) => Task.FromResult<LinuxWindowsRunnerConfig?>(null);
+        public Task<LinuxWindowsRunnerConfig?> ConfigureWindowsRunnerAsync(string gamePath, LinuxWindowsRunnerConfig? existing = null, bool isInstall = true) => Task.FromResult<LinuxWindowsRunnerConfig?>(existing ?? new());
         public Task ShowRateLimitExceededAsync() => Task.CompletedTask;
         public Task ShowGitLabRateLimitExceededAsync() => Task.CompletedTask;
         public Task ShowErrorAsync(string message, string title) { Error = message; return Task.CompletedTask; }

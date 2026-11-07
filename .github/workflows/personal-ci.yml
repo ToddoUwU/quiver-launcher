@@ -1,0 +1,52 @@
+# The C# launcher's own safety net, now that upstream's work has moved to Quiver 4.
+# Runs every test on each push to PersonalUpdates, and can be started by hand from the Actions tab.
+# GitHub only runs scheduled workflows from the default branch (main, the Tauri mirror), so a nightly run has to be
+# local: see tools/install-automation.
+name: Personal CI (C# launcher)
+
+on:
+  push:
+    branches: [ PersonalUpdates ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      POSTHOG_PROJECT_TOKEN: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Run every launcher test
+        run: >
+          dotnet test QuiverLauncher.Tests/QuiverLauncher.Tests.csproj -c Release
+          -nodeReuse:false -p:UseSharedCompilation=false
+          --logger "trx;LogFileName=results.trx" --logger "console;verbosity=minimal"
+          --results-directory test-results --blame-hang-timeout 12m
+
+      - name: Keep the results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results/*.trx
+          retention-days: 14
+
+      - name: Check the scripts parse
+        run: |
+          python3 -m py_compile tools/gamesmoke/smoke.py
+          python3 -c "import ast,sys; ast.parse(open('tools/quiver-audit').read())"
+          bash -n tools/quiver-test
+          bash -n tools/install-automation

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Optional: links the test tools into ~/.local/bin and sets up a nightly run of the launcher tests and the read-only
+# library audit, as a systemd user timer. You turn this on yourself; nothing else installs it.
+#   tools/install-automation          install or refresh
+#   tools/install-automation --off    stop the nightly run (the tools stay)
+set -euo pipefail
+HERE=$(cd "$(dirname "$(readlink -f "$0")")" && pwd)
+UNITS=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+if [[ ${1:-} == --off ]]; then
+  systemctl --user disable --now quiver-nightly.timer
+  exit 0
+fi
+mkdir -p "$HOME/.local/bin" "$UNITS"
+ln -sf "$HERE/quiver-test" "$HOME/.local/bin/quiver-test"
+ln -sf "$HERE/quiver-audit" "$HOME/.local/bin/quiver-audit"
+ln -sf "$HERE/gamesmoke/smoke.py" "$HOME/.local/bin/quiver-smoke"
+cat >"$UNITS/quiver-nightly.service" <<UNIT
+[Unit]
+Description=Quiver: launcher tests and library audit
+
+[Service]
+Type=oneshot
+Nice=15
+IOSchedulingClass=idle
+# Tests first; the audit always runs, and either one failing shows a notification.
+ExecStart=-$HOME/.local/bin/quiver-test --notify
+ExecStart=-$HOME/.local/bin/quiver-audit --notify
+UNIT
+cat >"$UNITS/quiver-nightly.timer" <<UNIT
+[Unit]
+Description=Quiver: nightly launcher tests and library audit
+
+[Timer]
+OnCalendar=*-*-* 05:00
+# Missed because the PC was off: run soon after it next starts.
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl --user daemon-reload
+systemctl --user enable --now quiver-nightly.timer
+systemctl --user list-timers quiver-nightly.timer --no-pager | head -3
