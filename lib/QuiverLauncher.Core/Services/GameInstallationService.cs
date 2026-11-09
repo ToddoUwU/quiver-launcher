@@ -882,17 +882,26 @@ public static class GameInstallationService
         }
     }
 
-    static string GetEffectiveExtractionSource(string extractPath)
+    /// <summary>
+    /// Peels every lone wrapper folder off a freshly extracted archive. Some releases nest the app more than one folder
+    /// deep (Star Fox Enhanced ships <c>dist/StarFoxEnhanced-linux-x64/...</c>). This has to happen here, in the staging
+    /// folder: an update merges over a game folder whose root already holds the old executable, so
+    /// <see cref="EnsureExecutableAtRoot"/> never hoists anything and the new build would sit in a subfolder while the old
+    /// one kept launching. A fresh install already ended up flattened that way, so updates now match installs.
+    /// </summary>
+    internal static string GetEffectiveExtractionSource(string extractPath)
     {
-        var rootDirs = Directory.GetDirectories(extractPath, "*", SearchOption.TopDirectoryOnly);
-        var rootFiles = Directory.GetFiles(extractPath, "*", SearchOption.TopDirectoryOnly);
-
-        if (rootDirs.Length == 1 && rootFiles.Length == 0)
+        var source = extractPath;
+        while (true)
         {
-            return rootDirs[0];
+            var rootDirs = Directory.GetDirectories(source, "*", SearchOption.TopDirectoryOnly);
+            if (rootDirs.Length != 1 || Directory.GetFiles(source, "*", SearchOption.TopDirectoryOnly).Length != 0)
+                return source;
+            // A macOS bundle is the app itself, never a wrapper.
+            if (rootDirs[0].EndsWith(".app", StringComparison.OrdinalIgnoreCase))
+                return source;
+            source = rootDirs[0];
         }
-
-        return extractPath;
     }
 
     /// <summary>

@@ -42,6 +42,13 @@ sync_fork() {
   echo "== $(date) :: sync" >>"$log"
   timeout 60 "${g[@]}" fetch --quiet upstream v3 2>>"$log" || die "Couldn't reach upstream (see $log)."
   timeout 60 "${g[@]}" fetch --quiet upstream refs/heads/v3:refs/remotes/upstream/v3 2>>"$log"
+  # Never take the Quiver 4 rewrite: only mirror/merge upstream's v3 while it is still the C# app.
+  local top; top=$("${g[@]}" ls-tree --name-only upstream/v3 2>/dev/null)
+  if ! grep -qx 'QuiverLauncher.App.csproj' <<<"$top" || grep -qx -e 'src-tauri' -e 'Cargo.toml' <<<"$top"; then
+    echo "refused: upstream/v3 is no longer the C# app" >>"$log"
+    say "upstream's v3 branch no longer looks like the C# Quiver (no QuiverLauncher.App.csproj, or Tauri/Rust files), so nothing was mirrored or merged."
+    return 0
+  fi
   timeout 60 "${g[@]}" push --quiet origin upstream/v3:refs/heads/v3 >>"$log" 2>&1 || say "couldn't push v3 to your fork (see $log)"
   timeout 60 "${g[@]}" fetch --quiet origin 2>>"$log" || true
   [[ $("${g[@]}" branch --show-current) == PersonalUpdates ]] || { say "not on PersonalUpdates; nothing merged"; return 0; }

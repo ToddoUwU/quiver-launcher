@@ -2,7 +2,6 @@ using System.Diagnostics;
 using Velopack;
 using Velopack.Exceptions;
 using Velopack.Locators;
-using Velopack.Sources;
 
 namespace QuiverLauncher.Services;
 
@@ -16,20 +15,12 @@ public sealed class VelopackUpdateService
     private UpdateInfo? _lastUpdateInfo;
     private bool _lastIncludePrerelease;
 
-    public bool IsInstalled
-    {
-        get
-        {
-            try
-            {
-                return VelopackLocator.Current?.CurrentlyInstalledVersion != null;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-    }
+    /// <summary>
+    /// Always false on PersonalUpdates: this build is compiled from the fork's C# 3.x source and must never replace
+    /// itself with a release from upstream's repository, whose releases are now the Quiver 4 (Tauri) rewrite. Every check,
+    /// download and apply path below stops on this, and <see cref="CreateManager"/> refuses as a backstop.
+    /// </summary>
+    public bool IsInstalled => false;
 
     public string? CurrentVersion
     {
@@ -228,11 +219,9 @@ public sealed class VelopackUpdateService
         });
     }
 
-    private static UpdateManager CreateManager(bool includePrerelease, string? gitHubToken = null)
-    {
-        var source = new GithubSource(GitHubRepoUrl, gitHubToken, includePrerelease);
-        return new UpdateManager(source);
-    }
+    private static UpdateManager CreateManager(bool includePrerelease, string? gitHubToken = null) =>
+        throw new InvalidOperationException(
+            "Launcher self-update is disabled in this build: Quiver is built from the fork's C# source, never upstream releases.");
 }
 
 public sealed class VelopackCheckResult
