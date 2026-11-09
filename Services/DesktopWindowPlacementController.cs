@@ -52,7 +52,36 @@ internal sealed class DesktopWindowPlacementController : IDisposable
             _placement = _initialPlacement;
     }
 
-    private void Opened(object? sender, EventArgs e) => Resume();
+    private void Opened(object? sender, EventArgs e)
+    {
+        Resume();
+        if (_placement != null && _window.WindowState is WindowState.FullScreen or WindowState.Maximized)
+        {
+            var target = new PixelPoint(_placement.X, _placement.Y);
+            DispatcherTimer.RunOnce(() => MoveStartupStateToSavedScreen(target), TimeSpan.FromMilliseconds(300));
+        }
+    }
+
+    /// <summary>
+    /// COSMIC (like other Wayland compositors running Xwayland) maps a new X11 window on the active output and ignores the
+    /// position it asked for, so a fullscreen start lands on whichever monitor had focus (the streamed monitor lost Quiver
+    /// to the other one). A mapped window's move request is honoured, so: drop out of fullscreen, move onto the monitor the
+    /// window was last placed on, and restore the startup state there.
+    /// </summary>
+    private void MoveStartupStateToSavedScreen(PixelPoint target)
+    {
+        var state = _window.WindowState;
+        if (_disposed || !_window.IsVisible || state is not (WindowState.FullScreen or WindowState.Maximized)) return;
+        var want = _window.Screens.ScreenFromPoint(target);
+        var have = _window.Screens.ScreenFromWindow(_window);
+        if (want == null || have == null || want.Bounds == have.Bounds) return;
+        _window.WindowState = WindowState.Normal;
+        _window.Position = target;
+        DispatcherTimer.RunOnce(() =>
+        {
+            if (!_disposed && _window.IsVisible) _window.WindowState = state;
+        }, TimeSpan.FromMilliseconds(200));
+    }
 
     internal void Resume()
     {
