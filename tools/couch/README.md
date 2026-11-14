@@ -22,8 +22,13 @@ fork and G-Diffuser already seat pads by plug order; SpaghettiKart and Starship 
   (base f40cfd33) and PersonalUpdates-Starship (base 45c4f8d6).
 - `lus-seated GAME [--background] [--force]` (linked in ~/.local/bin): merges the tag in the game's version.txt into
   ~/QuiverLauncher/src/GAME PersonalUpdates (and upstream's libultraship commit into PersonalUpdates-GAME), pushes,
-  builds in a 20 GB-capped unit, installs `seated/` in the game folder. Conflicts abort and notify.
-- `play-seated`: the game's selected_executable.txt. Runs seated/ when it matches version.txt, else the release
+  builds (always inside the 20 GB-capped user unit `lus-seated-GAME`), installs `seated/` in the game folder.
+  Conflicts abort and notify. Log: ~/.local/state/quiver/lus-seated-GAME.log.
+- `play-seated`: copied (not linked: it finds the game from its own folder) into the game folder and named in its
+  selected_executable.txt. Runs seated/ when it matches version.txt, else the release
   AppImage for that session plus a background `lus-seated`.
+- `seat-test GAME-FOLDER`: end-to-end check in a headless gamescope. `seat-test-pads.py` plugs virtual pads
+  (045e:028e, the only pads the game is allowed to see) 2 -> 4 -> unplugs #2 -> plugs a 5th; passes when the game's
+  log reads ports 1 2 3 4 2. Restores the game's cfg. Refuses while a Moonlight stream is live.
 - Build packages (apt): libsdl2-net-dev libzip-dev zipcmp zipmerge ziptool nlohmann-json3-dev libtinyxml2-dev
   libspdlog-dev libboost-dev libogg-dev libvorbis-dev (plus libsdl2-dev libpng-dev libopengl-dev, already installed).

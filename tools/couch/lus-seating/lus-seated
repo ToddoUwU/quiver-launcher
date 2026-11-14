@@ -11,7 +11,7 @@
 # tag is merged into PersonalUpdates, upstream's new libultraship commit is merged into PersonalUpdates-<GAME>, both are
 # pushed to the forks, then the game is built. Any merge conflict stops the update (nothing is installed) and sends a
 # desktop notification; the game's play-seated wrapper keeps running the release AppImage meanwhile.
-# The build runs in a memory-capped user unit (20 GB, 10 jobs). Result: <game folder>/seated/{<exe>,<port>.o2r,tag}.
+# The build always runs in a memory-capped user unit lus-seated-<GAME> (20 GB, 10 jobs). Result: <game folder>/seated/{<exe>,<port>.o2r,tag}.
 # Log: ~/.local/state/quiver/lus-seated-<GAME>.log
 set -uo pipefail
 game=${1:-}; shift || true
@@ -35,12 +35,15 @@ export DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTI
 if [[ $force == 0 && -x $app/seated/$exe && "$(cat "$app/seated/tag" 2>/dev/null)" == "$want" ]]; then
   echo "$game $want is already built"; exit 0
 fi
-if [[ $bg == 1 ]]; then
-  # One rebuild at a time; the unit outlives the game and Quiver.
-  systemctl --user is-active -q "lus-seated-$game" && exit 0
+if [[ ${LUS_SEATED_IN_UNIT:-} != 1 ]]; then
+  # Every build runs in a memory-capped user unit (an uncapped build once took the session down), one per game at a
+  # time. --background returns at once and the unit outlives the game and Quiver; otherwise this waits and shows output.
+  systemctl --user is-active -q "lus-seated-$game" && { echo "a $game build is already running: journalctl --user -u lus-seated-$game"; exit 0; }
   args=("$game"); [[ $force == 1 ]] && args+=(--force)
-  exec systemd-run --user -q --unit="lus-seated-$game" --collect -p MemoryMax=20G -p MemorySwapMax=0 \
-       nice -n 10 "$self" "${args[@]}"
+  cap=(systemd-run --user -q --unit="lus-seated-$game" --collect -p MemoryMax=20G -p MemorySwapMax=0
+       --setenv=LUS_SEATED_IN_UNIT=1)
+  [[ $bg == 1 ]] && exec "${cap[@]}" nice -n 10 "$self" "${args[@]}"
+  exec "${cap[@]}" --wait --pipe nice -n 10 "$self" "${args[@]}"
 fi
 
 exec 9>"$lock"; flock -n 9 || { echo "another $game build is running"; exit 0; }

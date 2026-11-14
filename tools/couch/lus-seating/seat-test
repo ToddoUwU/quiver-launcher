@@ -1,0 +1,54 @@
+#!/bin/bash
+# seat-test GAME-FOLDER   e.g. seat-test MarioKart64-SpaghettiKart | StarFox64-Starship
+#
+# Checks couch seating end to end, out of sight: boots the folder's play-seated in a headless gamescope while
+# seat-test-pads.py plugs virtual pads 2 -> 4 -> unplugs pad 2 -> plugs a 5th. The game only sees those pads
+# (SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT=045e:028e), never the real ones. Passes when the game's log shows ports
+# 1, 2, 3, 4, then 2 again. The game's cfg is put back as it was (the run adds default stick values for new pads).
+# Refuses while a Moonlight stream is live, since virtual pads would show up there too.
+set -u
+here=$(dirname "$(readlink -f "$0")")
+folder=${1:?usage: seat-test GAME-FOLDER}
+app=$HOME/.local/share/QuiverLauncher/Apps/$folder
+out=$HOME/.local/state/quiver/seat-test/$folder
+[[ -x $app/play-seated ]] || { echo "no play-seated in $app"; exit 2; }
+for f in "$HOME"/.config/sunshine*/sunshine.log; do
+  [[ -f $f ]] || continue
+  last=$(grep -E "CLIENT (CONNECTED|DISCONNECTED)" "$f" | tail -1)
+  [[ $last == *"CLIENT CONNECTED"* ]] && { echo "a Moonlight stream is live ($f): not creating virtual pads"; exit 2; }
+done
+pgrep -x gamescope >/dev/null && { echo "gamescope is already running: close it first"; exit 2; }
+
+rm -rf "$out"; mkdir -p "$out"
+cfg=$(ls "$app"/*.cfg.json | grep -v bak | head -1)
+cp -a "$cfg" "$out/cfg.before"
+touch "$out/start"
+# The game appends to its log (rotating it by size), so read only what this run adds.
+log=$(ls -1t "$app"/logs/*.log 2>/dev/null | head -1)
+before=$(stat -c %s "$log" 2>/dev/null || echo 0)
+
+# Runs inside gamescope: refuse the real desktop, stay on gamescope's own X server.
+cat > "$out/in-gamescope.sh" <<'EOF'
+#!/bin/bash
+case "$DISPLAY" in ""|:0|:1) echo "refusing DISPLAY=$DISPLAY"; exit 99;; esac
+exec env -u WAYLAND_DISPLAY SDL_VIDEODRIVER=x11 "$@"
+EOF
+chmod +x "$out/in-gamescope.sh"
+
+python3 -I "$here/seat-test-pads.py" "$out/done" > "$out/pads.log" 2>&1 &
+pads=$!
+for _ in $(seq 40); do grep -q READY "$out/pads.log" && break; sleep 0.25; done
+python3 -I "$here/../headless-setup.py" --cwd "$app" --until "$out/done" --seconds 120 --keys "" --settle 3 \
+  --log "$out/gamescope.log" --env SDL_GAMECONTROLLER_IGNORE_DEVICES_EXCEPT=0x045e/0x028e \
+  -- "$out/in-gamescope.sh" "$app/play-seated"
+wait $pads
+
+if ! cmp -s "$cfg" "$out/cfg.before"; then cp -a "$cfg" "$out/cfg.after"; cp -a "$out/cfg.before" "$cfg"; fi
+now=$(ls -1t "$app"/logs/*.log 2>/dev/null | head -1)
+if [[ $now == "$log" && $(stat -c %s "$now") -ge $before ]]; then tail -c +$((before + 1)) "$now"; else cat "$now"; fi |
+  grep "Couch seating" > "$out/seating.txt"
+log=$now
+cat "$out/pads.log" "$out/seating.txt"
+got=$(grep -o -- "-> port [0-9]" "$out/seating.txt" | awk '{printf "%s ", $3}')
+if [[ $got == "1 2 3 4 2 " ]]; then echo "PASS: ports $got"; exit 0; fi
+echo "FAIL: ports '${got}', expected '1 2 3 4 2' (log: $log, run files: $out)"; exit 1
