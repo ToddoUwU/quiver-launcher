@@ -1,0 +1,112 @@
+#!/bin/bash
+# Two-player Super Mario 64 Co-op DX on one PC (couch co-op over Moonlight).
+#
+# sm64coopdx has no split screen, so this starts two copies side by side on the streamed ASUS monitor:
+#   player 1 (left half)  hosts a server on localhost and reads gamepad 0,
+#   player 2 (right half) joins it and reads gamepad 1, with its sound muted so audio is not doubled.
+# Each copy has its own config file (coop-p1.txt / coop-p2.txt in the save folder), made from your normal
+# sm64config.txt the first time. Both read gamepads in the background, so neither window needs focus.
+# Closing either window closes both.
+#
+#   sm64coopdx-local            play
+#   sm64coopdx-local --reset    rebuild the two config files from sm64config.txt first
+set -u
+# Same as quiver-tv: hide the wired desk pad so gamepad 0/1 are the two Moonlight controllers.
+export SDL_GAMECONTROLLER_IGNORE_DEVICES=${SDL_GAMECONTROLLER_IGNORE_DEVICES:-0x045e/0x0b12}
+GAME_DIR=${SM64COOPDX_DIR:-$HOME/.local/share/QuiverLauncher/Apps/SuperMario64-SuperMario64CoopDX}
+SAVE=$HOME/.local/share/sm64coopdx
+PORT=${SM64COOPDX_PORT:-7777}
+# The ASUS (DP-1) is X 2560..5119 in XWayland's layout; each player gets half of it.
+X0=${SM64COOPDX_X:-2560} W=${SM64COOPDX_W:-2560} H=${SM64COOPDX_H:-1440}
+HALF=$((W / 2))
+LOG=$HOME/.local/state/quiver/sm64coopdx-local.log
+mkdir -p "$(dirname "$LOG")"
+exec >>"$LOG" 2>&1
+echo "== $(date '+%F %T') start"
+
+make_config() {  # name x gamepad volume
+  local out=$SAVE/$1
+  [[ -f $out && ${RESET:-0} == 0 ]] && return
+  python3 -I - "$SAVE/sm64config.txt" "$out" "$2" "$3" "$4" "$HALF" "$H" <<'EOF'
+import sys
+src, out, x, pad, vol, w, h = sys.argv[1:]
+want = {"fullscreen": "false", "window_x": x, "window_y": "0", "window_w": w, "window_h": h,
+        "gamepad_number": pad, "background_gamepad": "true", "master_volume": vol, "disable_gamepads": "false"}
+lines, seen = [], set()
+for line in open(src):
+    key = line.split(" ", 1)[0]
+    if key in want:
+        line = f"{key} {want[key]}\n"; seen.add(key)
+    lines.append(line)
+lines += [f"{k} {v}\n" for k, v in want.items() if k not in seen]
+open(out, "w").writelines(lines)
+EOF
+  echo "wrote $out"
+}
+[[ ${1:-} == --reset ]] && RESET=1
+make_config coop-p1.txt "$X0" 0 80
+make_config coop-p2.txt "$((X0 + HALF))" 1 0
+
+cd "$GAME_DIR" || exit 1
+COMMON=(--skip-intro --hide-loading-screen --no-discord --skip-update-check)
+./sm64coopdx --configfile coop-p1.txt --server "$PORT" --playername "Mario" "${COMMON[@]}" &
+P1=$!
+sleep "${SM64COOPDX_JOIN_DELAY:-6}"
+./sm64coopdx --configfile coop-p2.txt --client 127.0.0.1 "$PORT" --playername "Luigi" "${COMMON[@]}" &
+P2=$!
+
+# COSMIC places new X11 windows itself and ignores the position they ask for, but it honours a move made after
+# the window is mapped, so put each window on its half once it is up.
+python3 -I - "$P1" "$X0" "$P2" "$((X0 + HALF))" "$HALF" "$H" <<'EOF' &
+import ctypes, sys, time
+X = ctypes.cdll.LoadLibrary("libX11.so.6")
+X.XOpenDisplay.restype = ctypes.c_void_p
+for f in ("XDefaultRootWindow", "XInternAtom"):
+    getattr(X, f).restype = ctypes.c_ulong
+X.XInternAtom.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_int]
+X.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+X.XQueryTree.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+                         ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)), ctypes.POINTER(ctypes.c_uint)]
+X.XGetWindowProperty.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_long, ctypes.c_long, ctypes.c_int,
+                                 ctypes.c_ulong, ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_int),
+                                 ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+                                 ctypes.POINTER(ctypes.POINTER(ctypes.c_ubyte))]
+X.XMoveResizeWindow.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint]
+X.XFlush.argtypes = [ctypes.c_void_p]
+d = X.XOpenDisplay(None)
+if not d:
+    sys.exit("no X display")
+PID = X.XInternAtom(d, b"_NET_WM_PID", 1)
+root = X.XDefaultRootWindow(d)
+
+def windows(w):
+    r, p, kids, n = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.POINTER(ctypes.c_ulong)(), ctypes.c_uint()
+    if not X.XQueryTree(d, w, ctypes.byref(r), ctypes.byref(p), ctypes.byref(kids), ctypes.byref(n)):
+        return
+    for i in range(n.value):
+        yield kids[i]
+        yield from windows(kids[i])
+
+def pid_of(w):
+    t, f, n, left, data = ctypes.c_ulong(), ctypes.c_int(), ctypes.c_ulong(), ctypes.c_ulong(), ctypes.POINTER(ctypes.c_ubyte)()
+    if X.XGetWindowProperty(d, w, PID, 0, 1, 0, 6, ctypes.byref(t), ctypes.byref(f), ctypes.byref(n), ctypes.byref(left), ctypes.byref(data)) == 0 and n.value:
+        return ctypes.cast(data, ctypes.POINTER(ctypes.c_ulong))[0]
+
+want = {int(sys.argv[1]): int(sys.argv[2]), int(sys.argv[3]): int(sys.argv[4])}
+w_, h_ = int(sys.argv[5]), int(sys.argv[6])
+placed, end = set(), time.time() + 60
+while len(placed) < len(want) and time.time() < end:
+    for w in list(windows(root)):
+        p = pid_of(w)
+        if p in want and p not in placed:
+            time.sleep(1.5)  # let the game finish creating its window
+            X.XMoveResizeWindow(d, w, want[p], 0, w_, h_); X.XFlush(d)
+            placed.add(p); print("placed", p, "at", want[p])
+    time.sleep(0.5)
+EOF
+
+wait -n "$P1" "$P2"
+echo "a player window closed: closing the other"
+kill "$P1" "$P2" 2>/dev/null
+wait
+echo "== $(date '+%F %T') end"
