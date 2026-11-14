@@ -1,0 +1,107 @@
+#!/bin/bash
+# Builds SpaghettiKart / Starship from the ToddoUwU forks with couch seating (each gamepad gets its own port:
+# pad 1 -> port 1 ... pad 4 -> port 4; see apply-seating.py) and installs the result next to Quiver's copy.
+#
+#   lus-seated GAME [--background] [--force]     GAME = SpaghettiKart | Starship
+#
+# Source: ~/QuiverLauncher/src/<GAME> (origin ToddoUwU/<GAME>, upstream HarbourMasters, push disabled), branch
+# PersonalUpdates = the release tag + its libultraship submodule pointed at ToddoUwU/libultraship branch
+# PersonalUpdates-<GAME> (that release's libultraship commit + the seating commit).
+# The target version is the game's version.txt in the Quiver library, so a Quiver update is followed by itself: the new
+# tag is merged into PersonalUpdates, upstream's new libultraship commit is merged into PersonalUpdates-<GAME>, both are
+# pushed to the forks, then the game is built. Any merge conflict stops the update (nothing is installed) and sends a
+# desktop notification; the game's play-seated wrapper keeps running the release AppImage meanwhile.
+# The build runs in a memory-capped user unit (20 GB, 10 jobs). Result: <game folder>/seated/{<exe>,<port>.o2r,tag}.
+# Log: ~/.local/state/quiver/lus-seated-<GAME>.log
+set -uo pipefail
+game=${1:-}; shift || true
+bg=0; force=0
+for a in "$@"; do case $a in --background) bg=1;; --force) force=1;; *) echo "unknown option $a" >&2; exit 2;; esac; done
+case $game in
+  SpaghettiKart) folder=MarioKart64-SpaghettiKart exe=Spaghettify o2r=spaghetti.o2r o2r_target=GenerateO2R
+                 extras="config.yml yamls meta";;
+  Starship)      folder=StarFox64-Starship exe=Starship o2r=starship.o2r o2r_target=GeneratePortO2R extras="";;
+  *) echo "usage: lus-seated SpaghettiKart|Starship [--background] [--force]" >&2; exit 2;;
+esac
+src=$HOME/QuiverLauncher/src/$game
+app=$HOME/.local/share/QuiverLauncher/Apps/$folder
+log=$HOME/.local/state/quiver/lus-seated-$game.log
+lock=$HOME/.local/state/quiver/lus-seated-$game.lock
+want=$(tr -d '\r\n' < "$app/version.txt")
+self=$(readlink -f "$0")
+export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+export DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}
+
+if [[ $force == 0 && -x $app/seated/$exe && "$(cat "$app/seated/tag" 2>/dev/null)" == "$want" ]]; then
+  echo "$game $want is already built"; exit 0
+fi
+if [[ $bg == 1 ]]; then
+  # One rebuild at a time; the unit outlives the game and Quiver.
+  systemctl --user is-active -q "lus-seated-$game" && exit 0
+  args=("$game"); [[ $force == 1 ]] && args+=(--force)
+  exec systemd-run --user -q --unit="lus-seated-$game" --collect -p MemoryMax=20G -p MemorySwapMax=0 \
+       nice -n 10 "$self" "${args[@]}"
+fi
+
+exec 9>"$lock"; flock -n 9 || { echo "another $game build is running"; exit 0; }
+exec > >(tee -a "$log") 2>&1
+echo "== $(date '+%F %T') $game: building $want with couch seating"
+fail() {
+  echo "FAILED: $*"
+  notify-send -a Quiver "$game couch build failed" "$*. Playing the release meanwhile (pick pads in F1). Log: $log" 2>/dev/null
+  exit 1
+}
+
+cd "$src" || fail "no source at $src"
+git switch -q PersonalUpdates || fail "cannot switch to PersonalUpdates"
+git fetch -q upstream --tags || fail "cannot fetch upstream"
+git rev-parse -q --verify "$want^{commit}" >/dev/null || fail "upstream has no tag $want"
+if ! git merge-base --is-ancestor "$want" HEAD; then
+  echo "merging upstream $want into PersonalUpdates"
+  if ! git merge -q --no-edit --no-ff "$want"; then
+    # Our only change in this repo is the libultraship pointer, so that is the only conflict that can be resolved here.
+    if [[ "$(git diff --name-only --diff-filter=U)" != libultraship ]]; then git merge --abort; fail "merge of $want conflicts"; fi
+  fi
+fi
+# The submodule must be upstream's libultraship for this tag plus the seating commit.
+up_lus=$(git rev-parse "$want:libultraship") || fail "cannot read the libultraship commit of $want"
+git submodule update -q --init libultraship 2>/dev/null || true
+(
+  cd libultraship || exit 1
+  git remote get-url upstream >/dev/null 2>&1 || {
+    git remote add upstream https://github.com/Kenix3/libultraship.git
+    git remote set-url --push upstream DISABLED-read-only-upstream; }
+  git fetch -q origin "PersonalUpdates-$game" && git fetch -q upstream || exit 1
+  git cat-file -e "$up_lus^{commit}" 2>/dev/null || git fetch -q upstream "$up_lus" || exit 1
+  git switch -q -C "PersonalUpdates-$game" "origin/PersonalUpdates-$game" || exit 1
+  if ! git merge-base --is-ancestor "$up_lus" HEAD; then
+    echo "merging libultraship $up_lus into PersonalUpdates-$game"
+    git merge -q --no-edit "$up_lus" || { git merge --abort; exit 3; }
+    git push -q origin "PersonalUpdates-$game" || exit 1
+  fi
+  grep -rq "Couch seating (PersonalUpdates)" src || exit 4
+) ; rc=$?
+case $rc in 0) ;; 3) git merge --abort 2>/dev/null; fail "libultraship $up_lus conflicts with the seating patch";;
+  4) git merge --abort 2>/dev/null; fail "the seating patch is missing from libultraship";;
+  *) git merge --abort 2>/dev/null; fail "libultraship update failed";; esac
+git add libultraship
+if [[ -f .git/MERGE_HEAD ]]; then git commit -q --no-edit || fail "cannot commit the merge"
+elif ! git diff --cached --quiet; then git commit -q -m "libultraship: couch seating on $want's base" || fail "commit failed"; fi
+git push -q origin PersonalUpdates || echo "warning: push to origin failed (building anyway)"
+git submodule update -q --init --recursive || fail "submodule update failed"
+commit=$(git rev-parse --short HEAD)
+
+cmake -S . -B build-seated -GNinja -DCMAKE_BUILD_TYPE=Release >/dev/null || fail "cmake configure failed"
+cmake --build build-seated -j10 --target "$exe" || fail "build of $exe failed"
+cmake --build build-seated -j10 --target "$o2r_target" || fail "packing $o2r failed"
+
+stage=$app/seated.new
+rm -rf "$stage" && mkdir -p "$stage" || fail "cannot write $stage"
+cp -p "build-seated/$exe" "$stage/" && cp -p "build-seated/$o2r" "$stage/" || fail "install copy failed"
+for x in $extras; do [[ -e $x ]] && cp -a "$x" "$stage/"; done
+printf '%s\n' "$want" > "$stage/tag"; printf '%s\n' "$commit" > "$stage/commit"
+rm -rf "$app/seated.old"; [[ -d $app/seated ]] && mv "$app/seated" "$app/seated.old"
+mv "$stage" "$app/seated" && rm -rf "$app/seated.old"
+echo "== $(date '+%F %T') installed $game $want ($commit) in $app/seated"
+notify-send -a Quiver "$game: couch seating ready" "Built $want: every controller now gets its own player." 2>/dev/null
+exit 0

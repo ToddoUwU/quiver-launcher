@@ -11,3 +11,19 @@ Made 2026-11-13 for the local-multiplayer batch (see ~/CouchGames.md and ~/Couch
 | `sm64coopdx-local` | Two Co-op DX windows side by side on the ASUS: P1 hosts on localhost with gamepad 0, P2 joins with gamepad 1 (muted). Moonlight tile "Mario 64 Co-op (2 players)". |
 
 Never run a game binary outside headless-setup.py (even `--help` opens a window on the real desktop).
+
+## lus-seating/: one controller per player in SpaghettiKart and Starship
+
+Stock libultraship puts every gamepad on port 1 (ports 2-4 ignore them all at each refresh). BattleShip's libultraship
+fork and G-Diffuser already seat pads by plug order; SpaghettiKart and Starship are rebuilt with the same logic.
+
+- `apply-seating.py <libultraship checkout>`: the patch (idempotent). Pad N -> port N up to 4, seats kept across
+  hot-plug, `LUS_AUTO_SEAT=0` = stock behaviour. Committed on ToddoUwU/libultraship branches PersonalUpdates-SpaghettiKart
+  (base f40cfd33) and PersonalUpdates-Starship (base 45c4f8d6).
+- `lus-seated GAME [--background] [--force]` (linked in ~/.local/bin): merges the tag in the game's version.txt into
+  ~/QuiverLauncher/src/GAME PersonalUpdates (and upstream's libultraship commit into PersonalUpdates-GAME), pushes,
+  builds in a 20 GB-capped unit, installs `seated/` in the game folder. Conflicts abort and notify.
+- `play-seated`: the game's selected_executable.txt. Runs seated/ when it matches version.txt, else the release
+  AppImage for that session plus a background `lus-seated`.
+- Build packages (apt): libsdl2-net-dev libzip-dev zipcmp zipmerge ziptool nlohmann-json3-dev libtinyxml2-dev
+  libspdlog-dev libboost-dev libogg-dev libvorbis-dev (plus libsdl2-dev libpng-dev libopengl-dev, already installed).

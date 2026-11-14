@@ -1,0 +1,25 @@
+#!/bin/bash
+# Quiver entry point (selected_executable.txt) for SpaghettiKart and Starship: runs the couch-seating build in seated/
+# (each controller gets its own player: pad 1 -> port 1 ... pad 4 -> port 4), built by lus-seated from the ToddoUwU
+# forks. When Quiver has installed a version that seated/ is not built for yet, this session runs the release AppImage
+# (all pads drive player 1 there; assign them in F1 > Controller Mapping) and the rebuild starts in the background.
+# LUS_AUTO_SEAT=0 in the environment turns seating off in the seated build.
+cd "$(dirname "$(readlink -f "$0")")"
+case $(basename "$PWD") in
+  MarioKart64-SpaghettiKart) game=SpaghettiKart exe=Spaghettify;;
+  StarFox64-Starship)        game=Starship exe=Starship;;
+  *) echo "play-seated: unknown game folder $PWD" >&2; exit 1;;
+esac
+want=$(tr -d '\r\n' < version.txt)
+# Steam's desktop-layout virtual pad (28de:11ff, added when Steam runs) takes input from nothing: keep it out of the seats.
+export SDL_GAMECONTROLLER_ALLOW_STEAM_VIRTUAL_GAMEPAD=0
+if [[ -x seated/$exe && "$(cat seated/tag 2>/dev/null)" == "$want" ]]; then
+  exec "./seated/$exe" "$@"
+fi
+"$HOME/.local/bin/lus-seated" "$game" --background >/dev/null 2>&1
+notify-send -a Quiver "$game: building couch seating for $want" \
+  "This session uses the release: pick each player's pad in F1 > Controller Mapping." 2>/dev/null
+img=$(ls -1t -- *.appimage *.AppImage 2>/dev/null | head -1)
+[[ -n $img ]] || { echo "play-seated: no AppImage in $PWD" >&2; exit 1; }
+chmod +x "$img"
+exec "./$img" "$@"
